@@ -214,10 +214,14 @@ return [
 
     'environments' => [
         'production' => [
+            // 1 GB Droplet: keep a single worker. Do not raise without measuring RAM/swap.
             'supervisor-1' => [
-                'maxProcesses' => 10,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
+                'maxProcesses' => 1,
+                'balance' => 'simple',
+                'memory' => 128,
+                'maxJobs' => 100,
+                'tries' => 3,
+                'timeout' => 90,
             ],
         ],
 
