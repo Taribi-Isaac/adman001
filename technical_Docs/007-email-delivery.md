@@ -23,10 +23,14 @@ EmailDeliveryAdapter (contract)
       ↓
 LaravelMailEmailDeliveryAdapter
       ↓
-Laravel Mail (MAIL_* / configured mailer)
+Laravel Mail (MAIL_MAILER)
+      ↓
+Resend (production) / log|array (local/tests)
 ```
 
-Provider-specific API calls stay behind `App\Contracts\EmailDeliveryAdapter`. The first adapter uses Laravel’s mail abstraction so SMTP, SES, Postmark, Resend, `log`, or `array` can be configured via environment without changing domain code.
+Provider-specific API calls stay behind `App\Contracts\EmailDeliveryAdapter`. The adapter uses Laravel’s mail abstraction so **Resend**, SMTP, `log`, or `array` can be configured via environment without changing domain code.
+
+**Production provider:** Resend (not Amazon SES). Domain: `raslordeckltd.com` (verified in Resend).
 
 ---
 
@@ -46,11 +50,26 @@ To add a direct provider SDK later, implement the contract and rebind the interf
 
 ### Environment (secrets / transport)
 
-- `MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, …
-- `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` (fallback From)
-- `ADMAN_EMAIL_ENABLED` — deployment kill switch (`config/adman.php`)
+Production (Resend API mailer):
 
-**Never store provider API keys or SMTP passwords in the database.**
+| Variable | Purpose |
+|----------|---------|
+| `MAIL_MAILER=resend` | Use Laravel Resend transport |
+| `RESEND_API_KEY` | Resend API key (server `.env` only) |
+| `MAIL_FROM_ADDRESS` | Fallback From if `Business.email` empty (use `@raslordeckltd.com`) |
+| `MAIL_FROM_NAME` | Fallback From name |
+| `ADMAN_EMAIL_ENABLED` | Deployment kill switch (`config/adman.php`) |
+
+Local/tests typically use `MAIL_MAILER=log` or `array`. SMTP vars remain available for non-production alternatives.
+
+Package: `resend/resend-php` (Laravel native Resend transport). Config: `config/mail.php` mailer `resend`, `config/services.php` → `RESEND_API_KEY`.
+
+**Never store provider API keys in the database, Git, or `.env.example` values.**
+
+### Delivery-status semantics
+
+- ADMAN `sent` = Laravel/Resend **accepted** the submission (provider Message-ID when available).
+- Mailbox delivery, bounces, and complaints require Resend webhooks/events — **not** integrated in this phase. Do not treat UI “Sent” as mailbox confirmation.
 
 ### Business settings (org)
 
@@ -194,28 +213,41 @@ Recorded failures include a staff-safe reason (no raw credentials). Retry uses t
 ## Known limitations
 
 - No inbound email / mailbox sync
-- No delivery/open webhooks for `delivered` from Laravel Mail alone
+- No Resend delivery/bounce/complaint webhooks yet (`delivered` status reserved)
 - Automated invoice reminders are owned by Task 009 (`ReminderService` → `queueInvoiceReminderEmail`); this domain still owns delivery only
 - No automatic email on recurring generation
 - No WhatsApp
 - No bulk/marketing mail
+- Amazon SES is **not** used (Resend is the production provider)
 
 ---
 
 ## Deferred functionality
 
 - Inbound email + threading
-- Provider delivery webhooks
-- Automated reminders (future task)
+- Resend delivery webhooks / bounce handling
+- Automated reminders (owned by reminder domain)
 - WhatsApp delivery adapter
-- Richer per-contact communication preferences / bounce handling
+- Richer per-contact communication preferences
 
 ---
 
-## Practical setup
+## Practical setup (production Resend)
 
-1. Configure `MAIL_*` for the chosen Laravel mailer
-2. Set Business email / reply-to / outbound enabled
-3. `php artisan migrate` + reseed permissions if needed
-4. Run queue workers / Horizon
-5. Send from an issued quote/invoice or confirmed payment acknowledgement
+1. Confirm domain `raslordeckltd.com` is verified in Resend
+2. Create a Resend API key; set `RESEND_API_KEY` in server `.env` only
+3. Set `MAIL_MAILER=resend`, `MAIL_FROM_ADDRESS=no-reply@raslordeckltd.com` (or Business email under the same domain)
+4. Set Business `email` / `email_reply_to` / `outbound_email_enabled` in Settings
+5. Set `ADMAN_EMAIL_ENABLED=true`
+6. `php artisan config:cache` then restart Horizon (`sudo systemctl restart adman-horizon`)
+7. Send from an issued quote/invoice or confirmed payment acknowledgement to an **authorized test recipient**
+8. Confirm Horizon processes `SendOutboundEmailJob`, Resend dashboard shows the message, recipient receives PDF attachment
+
+### Diagnose failed email jobs
+
+```bash
+php artisan horizon:status
+journalctl -u adman-horizon -n 100 --no-pager
+# Inspect failed jobs in Horizon UI (/horizon — requires system.horizon)
+# Confirm RESEND_API_KEY is set (do not print it) and MAIL_MAILER=resend
+```

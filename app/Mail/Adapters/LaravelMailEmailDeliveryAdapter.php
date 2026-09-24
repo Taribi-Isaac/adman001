@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\Mail;
 use Throwable;
 
 /**
- * First email provider adapter: Laravel's mail abstraction (SMTP / SES / Postmark / log / array).
- * Swap this binding to introduce a direct provider SDK without changing EmailOutboundService.
+ * Email provider adapter via Laravel's mail abstraction (Resend / SMTP / log / array / …).
+ * Production uses MAIL_MAILER=resend. Swap this binding only for a direct provider SDK.
  */
 final class LaravelMailEmailDeliveryAdapter implements EmailDeliveryAdapter
 {
