@@ -428,6 +428,42 @@ No sustained heavy swapping observed. PHP-FPM left at `ondemand` / `max_children
 
 ---
 
+## Task 022 — Resend email (in progress — API key prerequisite)
+
+| Item | State |
+|------|--------|
+| Provider | **Resend** (replaces planned SES) |
+| Package | `resend/resend-php` v1.15.0 on `main` @ `76b0c1b` and production |
+| Laravel mailer | Built-in `resend` transport + `config/services.php` `RESEND_API_KEY` |
+| Architecture | Unchanged: `EmailOutboundService` → `SendOutboundEmailJob` → Horizon → `LaravelMailEmailDeliveryAdapter` → Mail |
+| Domain | `raslordeckltd.com` (operator-verified in Resend; not re-checked via API in this task) |
+| Sender | `no-reply@raslordeckltd.com` (Business.email + `MAIL_FROM_*` fallback) |
+| Production `.env` | `MAIL_MAILER` still `log`; `ADMAN_EMAIL_ENABLED=false`; `RESEND_API_KEY` empty until operator adds key |
+| Controlled send | **Blocked** on API key |
+
+### Operator action to finish Task 022
+
+1. Create a Resend API key in the Resend dashboard.
+2. On the Droplet, set in `/var/www/adman/.env` (do not paste into chat/Git):
+
+```env
+MAIL_MAILER=resend
+RESEND_API_KEY=re_********
+ADMAN_EMAIL_ENABLED=true
+```
+
+3. Then:
+
+```bash
+cd /var/www/adman
+php artisan config:cache
+sudo systemctl restart adman-horizon
+```
+
+4. Reply in chat with an **authorized test recipient** email (or confirm using `admin@raslordeckltd.com`). Cursor will run a controlled invoice/quote PDF email through the existing ADMAN flow + Horizon and verify Resend acceptance.
+
+---
+
 ## DNS / SSL (Task 020 — completed 2026-09-24)
 
 ### DNS
