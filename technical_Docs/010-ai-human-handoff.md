@@ -219,17 +219,24 @@ ADMAN_AI_TIMEOUT=45
 5. WhatsApp Cloud API must be available for inbound session messages (AI auto-reply is WhatsApp-inbound only today)
 6. Confirm `ADMAN_AI_PROVIDER` is never `fake` in production (binding falls through to OpenAI-compatible provider; production-check blocks `fake`)
 
-### Task 024 status (2026-09-25)
+### Task 024 / 024B status (2026-09-25)
 
 | Item | State |
 |------|--------|
 | Architecture | Unchanged (Task 010) — OpenAI-compatible Chat Completions via Laravel HTTP |
 | Model | `gpt-4o-mini` (existing default — preserved) |
 | Provider binding | Production binds `OpenAiCompatibleProvider`; `fake` forbidden |
-| Missing-key behavior | Provider returns safe failure — **no fabricated customer replies** |
-| `ADMAN_AI_API_KEY` on production | **absent** — activation blocked on external credential |
-| `ADMAN_AI_ENABLED` | remains `false` until key is configured |
-| Business AI flags | remain `false` until activation |
-| WhatsApp | `ADMAN_WHATSAPP_ENABLED=false` — full inbound AI path also needs WhatsApp (separate task) |
+| Missing/invalid key | Provider returns safe failure — **no fabricated customer replies**; no financial mutations |
+| `ADMAN_AI_API_KEY` | **present: yes** (server `.env` only; never Git) |
+| `ADMAN_AI_ENABLED` | **true** |
+| Business AI flags | `ai_enabled` + `ai_customer_responses_enabled` **true** |
+| Live provider test | Succeeded (~1.3–3.5 s) |
+| Controlled verification | Business context, authorization denial, payment **claim** (not confirmation), human handoff, processing idempotency |
+| WhatsApp | `ADMAN_WHATSAPP_ENABLED=false` — full inbound WhatsApp→AI→WhatsApp path remains a **separate** prerequisite |
 
-Do **not** set `ADMAN_AI_ENABLED=true` without a real key.
+### Controlled verification notes (Task 024B)
+
+- Payment claim creates `pending_verification` only; invoice stays unpaid; confirmed payments unchanged.
+- After `request_human_handoff`, conversation mode is `human` and `AiService` skips further auto-replies.
+- Duplicate `processInboundMessage` on the same inbound id reuses one `ai_message_processings` row.
+- Invalid API key → HTTP 401 failure response, empty text, no FakeAiProvider, no payment/claim side effects; real key restored immediately after the test.

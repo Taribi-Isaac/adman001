@@ -6,20 +6,20 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 
 ---
 
-## Status (Task 024) — OpenAI activation awaiting API key
+## Status (Task 024B) — OpenAI production AI active (WhatsApp path pending)
 
 | Item | State |
 |------|--------|
 | Droplet | `165.232.103.182` (`lon1`), hostname `adman-prod` |
-| App | `/var/www/adman` @ `main` / `37dad1b…` |
+| App | `/var/www/adman` @ `main` (see latest Task 024B commit) |
 | Production URL | **`https://adman.raslordeckltd.com`** |
 | TLS | Let's Encrypt active; HTTP→HTTPS |
 | Horizon | **systemd `adman-horizon.service`** — 1 worker, `maxProcesses=1`, queue `default` |
 | Scheduler | **systemd `adman-scheduler.timer`** → `schedule:run` every minute |
 | Runtime user | `adman` (group `www-data`) — not root |
 | `adman:production-check --strict` | **PASS** |
-| Email | **Resend active** — controlled invoice PDF send verified (Task 023) |
-| AI | **Architecture ready**; production OpenAI key **not yet configured** (Task 024 blocked on external credential). `ADMAN_AI_ENABLED=false`. WhatsApp not configured |
+| Email | **Resend active** (Task 023) |
+| AI | **OpenAI active** — provider verified; controlled tools/safety verified (Task 024B). Full customer WhatsApp journey still pending |
 
 ### Task 017 security foundation (unchanged)
 
@@ -513,25 +513,27 @@ Findings:
 
 `php artisan config:cache` as `adman` can write `bootstrap/cache/config.php` as mode `600`. PHP-FPM (`www-data`) then cannot read it → HTTP 500 on `/up` and `/login`. Always ensure `adman:www-data` ownership and `664` on cached config after rebuild.
 
-## Task 024 — OpenAI AI activation (externally blocked 2026-09-25)
+## Task 024 — OpenAI AI activation (completed via Task 024B, 2026-09-25)
 
 | Item | State |
 |------|--------|
-| Git | `main` @ `37dad1b` pushed to GitHub; production fast-forwarded to match |
+| Git | `main` synchronized; production on intended commit after docs push |
 | Architecture | Task 010 preserved — `AiProvider` → `OpenAiCompatibleProvider` (HTTP Chat Completions) |
-| Model | `gpt-4o-mini` (existing) |
-| Env vars | `ADMAN_AI_ENABLED`, `ADMAN_AI_PROVIDER`, `ADMAN_AI_API_KEY`, `ADMAN_AI_BASE_URL`, `ADMAN_AI_MODEL`, `ADMAN_AI_TIMEOUT` |
-| `ADMAN_AI_API_KEY` | **present: no** on production — do not invent / do not enable AI |
-| Fake provider | Forbidden in production (binds real provider; missing key → safe failure, no fabricated replies) |
-| Controlled AI tests | **Not run against OpenAI** — blocked on API key |
-| WhatsApp | Still disabled — inbound AI auto-reply path is WhatsApp-only (additional prerequisite for full customer flow) |
+| Model | `gpt-4o-mini` (unchanged) |
+| Env | `ADMAN_AI_ENABLED=true`; `ADMAN_AI_PROVIDER=openai`; `ADMAN_AI_API_KEY` **present: yes**; base URL / timeout defaults |
+| Business flags | `ai_enabled` + `ai_customer_responses_enabled` **true** (Settings → AI fields) |
+| Fake provider | Forbidden; production binds real provider only |
+| Live OpenAI request | **Passed** (auth accepted; model `gpt-4o-mini`; ~1.3–3.5 s) |
+| Controlled tests | Business context ✓ · auth denial ✓ · payment claim (pending_verification) ✓ · no confirmed payment ✓ · human handoff ✓ · idempotent processing row ✓ |
+| Failure test | Invalid key → HTTP 401 safe failure; no fabricated text; no financial changes; real key restored |
+| Resources | Available RAM ~408→405→397 Mi; swap ~150–151 Mi flat; Horizon RSS ~64–66 Mi; load ~0.0x; no worker increase |
+| WhatsApp | Still disabled — full customer WhatsApp journey is a **separate** external prerequisite |
+| Email | Resend still healthy (`MAIL_MAILER=resend`) |
 | Horizon | Unchanged — 1 worker |
-| Email | Resend unchanged / still healthy after Task 024 inspection |
 
-### Operator action to finish Task 024
+### Activation procedure (repeatable)
 
-1. Create an OpenAI API key in the OpenAI dashboard.
-2. On the Droplet `/var/www/adman/.env` (never paste into chat/Git):
+1. Set server `/var/www/adman/.env` only (never Git/chat):
 
 ```env
 ADMAN_AI_ENABLED=true
@@ -540,10 +542,10 @@ ADMAN_AI_API_KEY=<production secret>
 ADMAN_AI_MODEL=gpt-4o-mini
 ```
 
-3. Rebuild config with group-readable cache + restart Horizon (same umask/`664` procedure as Resend).
-4. Enable Business AI flags in Settings → AI.
-5. For full inbound verification, WhatsApp production credentials are also required (`ProcessInboundAiMessage` only auto-replies on WhatsApp inbound). A narrow provider smoke test (`OpenAiCompatibleProvider::complete`) can validate the key before WhatsApp is live.
-6. Re-run controlled tests: general business question, authorized customer context, payment claim (not confirmed payment), human handoff, authorization denial, OpenAI failure path.
+2. `umask 002 && php artisan config:cache` then `adman:www-data` `664` on `bootstrap/cache/config.php`; `sudo systemctl restart adman-horizon`
+3. Enable Business AI flags in Settings → AI
+4. Smoke-test provider via `OpenAiCompatibleProvider::complete` before customer traffic
+5. Full inbound WhatsApp path requires WhatsApp production credentials (separate task)
 
 ---
 
@@ -626,7 +628,7 @@ Load: ~0.10 / 0.06 / 0.04
 
 ## Next step
 
-Resend production email path is verified (Task 023). OpenAI activation awaits a production `ADMAN_AI_API_KEY` (Task 024). WhatsApp remains separate. Do not raise Horizon concurrency without sustained memory-pressure evidence. Resend delivery webhooks/bounce handling remain deferred.
+OpenAI production provider and controlled AI safety verification are complete (Task 024B). Remaining for the full customer journey: **WhatsApp production activation**. Do not raise Horizon concurrency without sustained memory-pressure evidence. Resend delivery webhooks remain deferred.
 
 ---
 
