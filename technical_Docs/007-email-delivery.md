@@ -68,8 +68,9 @@ Package: `resend/resend-php` (Laravel native Resend transport). Config: `config/
 
 ### Delivery-status semantics
 
-- ADMAN `sent` = Laravel/Resend **accepted** the submission (provider Message-ID when available).
-- Mailbox delivery, bounces, and complaints require Resend webhooks/events — **not** integrated in this phase. Do not treat UI “Sent” as mailbox confirmation.
+- ADMAN `sent` = Laravel/Resend **accepted** the submission (Symfony Message-ID when available; otherwise a local `laravel-mail-{id}` fallback).
+- Provider dashboard events (e.g. Resend `delivered` / bounce / complaint) are **not** written back into ADMAN until webhooks are implemented. Do not treat UI “Sent” as durable mailbox confirmation inside the app.
+- Task 023 controlled production send: Resend accepted the API request and later reported `last_event=delivered` for the authorized test — ADMAN message remained `sent` (correct for current semantics).
 
 ### Business settings (org)
 
@@ -234,14 +235,18 @@ Recorded failures include a staff-safe reason (no raw credentials). Retry uses t
 
 ## Practical setup (production Resend)
 
+**Status (Task 023):** Production Resend is active. Controlled invoice PDF email verified through Horizon → Resend → authorized recipient.
+
 1. Confirm domain `raslordeckltd.com` is verified in Resend
-2. Create a Resend API key; set `RESEND_API_KEY` in server `.env` only
-3. Set `MAIL_MAILER=resend`, `MAIL_FROM_ADDRESS=no-reply@raslordeckltd.com` (or Business email under the same domain)
+2. Create a Resend API key; set `RESEND_API_KEY` in server `.env` only (never Git / `.env.example` values / docs)
+3. Set `MAIL_MAILER=resend`, `MAIL_FROM_ADDRESS=no-reply@raslordeckltd.com` (or rely on `Business.email` under the same domain)
 4. Set Business `email` / `email_reply_to` / `outbound_email_enabled` in Settings
 5. Set `ADMAN_EMAIL_ENABLED=true`
-6. `php artisan config:cache` then restart Horizon (`sudo systemctl restart adman-horizon`)
+6. `umask 002 && php artisan config:cache` then ensure `bootstrap/cache/config.php` is `adman:www-data` mode `664` (PHP-FPM cannot read mode `600`) and `sudo systemctl restart adman-horizon`
 7. Send from an issued quote/invoice or confirmed payment acknowledgement to an **authorized test recipient**
-8. Confirm Horizon processes `SendOutboundEmailJob`, Resend dashboard shows the message, recipient receives PDF attachment
+8. Confirm Horizon processes `SendOutboundEmailJob`, Resend shows the message, recipient receives PDF attachment
+
+Horizon production workers remain **1** (`maxProcesses=1`). Do not raise concurrency without measured sustained memory pressure.
 
 ### Diagnose failed email jobs
 
@@ -250,4 +255,5 @@ php artisan horizon:status
 journalctl -u adman-horizon -n 100 --no-pager
 # Inspect failed jobs in Horizon UI (/horizon — requires system.horizon)
 # Confirm RESEND_API_KEY is set (do not print it) and MAIL_MAILER=resend
+# Confirm ADMAN_EMAIL_ENABLED=true and Business.outbound_email_enabled
 ```

@@ -6,19 +6,19 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 
 ---
 
-## Status (Task 021) — Horizon + scheduler active
+## Status (Task 023) — Resend production email active
 
 | Item | State |
 |------|--------|
 | Droplet | `165.232.103.182` (`lon1`), hostname `adman-prod` |
-| App | `/var/www/adman` @ `main` / `8eb53dfe…` |
+| App | `/var/www/adman` @ `main` / `bd1d3e2…` (+ server `.env` Resend activation) |
 | Production URL | **`https://adman.raslordeckltd.com`** |
 | TLS | Let's Encrypt active; HTTP→HTTPS |
 | Horizon | **systemd `adman-horizon.service`** — 1 worker, `maxProcesses=1`, queue `default` |
 | Scheduler | **systemd `adman-scheduler.timer`** → `schedule:run` every minute |
 | Runtime user | `adman` (group `www-data`) — not root |
-| `adman:production-check --strict` | **PASS** (post-reboot verified) |
-| External integrations | **Resend package ready**; API key + production send pending. OpenAI / WhatsApp not configured |
+| `adman:production-check --strict` | **PASS** |
+| Email | **Resend active** — controlled invoice PDF send verified (Task 023). OpenAI / WhatsApp not configured |
 
 ### Task 017 security foundation (unchanged)
 
@@ -428,39 +428,89 @@ No sustained heavy swapping observed. PHP-FPM left at `ondemand` / `max_children
 
 ---
 
-## Task 022 — Resend email (in progress — API key prerequisite)
+## Task 022 — Resend package (completed)
 
 | Item | State |
 |------|--------|
-| Provider | **Resend** (replaces planned SES) |
+| Provider | **Resend** (not Amazon SES) |
 | Package | `resend/resend-php` v1.15.0 on `main` @ `76b0c1b` and production |
 | Laravel mailer | Built-in `resend` transport + `config/services.php` `RESEND_API_KEY` |
 | Architecture | Unchanged: `EmailOutboundService` → `SendOutboundEmailJob` → Horizon → `LaravelMailEmailDeliveryAdapter` → Mail |
-| Domain | `raslordeckltd.com` (operator-verified in Resend; not re-checked via API in this task) |
-| Sender | `no-reply@raslordeckltd.com` (Business.email + `MAIL_FROM_*` fallback) |
-| Production `.env` | `MAIL_MAILER` still `log`; `ADMAN_EMAIL_ENABLED=false`; `RESEND_API_KEY` empty until operator adds key |
-| Controlled send | **Blocked** on API key |
 
-### Operator action to finish Task 022
+Task 022 left production send disabled until the API key was available.
 
-1. Create a Resend API key in the Resend dashboard.
-2. On the Droplet, set in `/var/www/adman/.env` (do not paste into chat/Git):
+## Task 023 — Resend production activation (completed 2026-09-25)
+
+| Item | State |
+|------|--------|
+| Domain | `raslordeckltd.com` — verified sender identity accepted by Resend API |
+| From (live send) | `"ADMAN Business" <no-reply@raslordeckltd.com>` (`Business.email`; `MAIL_FROM_ADDRESS` fallback aligned to same address) |
+| Production `.env` | `MAIL_MAILER=resend`; `ADMAN_EMAIL_ENABLED=true`; `RESEND_API_KEY` present (server-only; never in Git) |
+| `.env` permissions | `600` `adman:www-data` |
+| Controlled send | **Passed** — issued invoice `INV-00001` → authorized recipient `admin@raslordeckltd.com` |
+| Queue / Horizon | `SendOutboundEmailJob` **DONE** (~922 ms); workers = **1**; failed_jobs = 0 |
+| ADMAN message | status `sent` (provider accepted); conversation history updated |
+| Resend | message accepted; `last_event` progressed to **`delivered`** (provider mailbox event — ADMAN does not yet store webhook delivery status) |
+| PDF | `INV-00001.pdf` generated (`application/pdf`, valid `%PDF-` header) and attached via `DocumentOutboundMail` |
+| Horizon concurrency | **unchanged** (`maxProcesses=1`) |
+
+### Activation procedure (repeatable)
+
+1. Ensure Resend domain `raslordeckltd.com` is verified; use a `@raslordeckltd.com` From.
+2. Set server `/var/www/adman/.env` only (never Git / `.env.example` values / chat):
 
 ```env
 MAIL_MAILER=resend
-RESEND_API_KEY=re_********
+RESEND_API_KEY=<production secret>
 ADMAN_EMAIL_ENABLED=true
+MAIL_FROM_ADDRESS=no-reply@raslordeckltd.com
 ```
 
-3. Then:
+3. Rebuild config with group-readable cache files (PHP-FPM runs as `www-data`):
 
 ```bash
 cd /var/www/adman
+umask 002
 php artisan config:cache
+# If config.php is mode 600, PHP-FPM cannot boot the app (HTTP 500):
+sudo chown adman:www-data bootstrap/cache/config.php
+sudo chmod 664 bootstrap/cache/config.php
 sudo systemctl restart adman-horizon
 ```
 
-4. Reply in chat with an **authorized test recipient** email (or confirm using `admin@raslordeckltd.com`). Cursor will run a controlled invoice/quote PDF email through the existing ADMAN flow + Horizon and verify Resend acceptance.
+4. Verify without dumping secrets:
+
+```bash
+php artisan tinker --execute='echo config("mail.default")." enabled=".(config("adman.email.enabled")?"true":"false")." key=".(filled(config("services.resend.key"))?"yes":"no");'
+```
+
+### Controlled email + PDF test procedure
+
+1. Use an **authorized** recipient only (e.g. `admin@raslordeckltd.com`) — never customers for activation tests.
+2. Issue an invoice/quote (or confirmed payment) via existing ADMAN services/UI.
+3. Queue via `EmailOutboundService::queueInvoiceEmail` (or Send by Email in UI).
+4. Confirm Horizon processes `SendOutboundEmailJob` (`journalctl -u adman-horizon`).
+5. Confirm message status `sent`, Resend dashboard/API shows the message, recipient receives PDF.
+6. ADMAN `sent` ≠ durable webhook-confirmed delivery unless Resend events are integrated later.
+
+### Memory / swap review (Task 023)
+
+| Sample | Available RAM | Swap used | Load | Notes |
+|--------|---------------|-----------|------|-------|
+| Pre-send | ~438 Mi | ~154 Mi | ~0.00 | si/so ≈ 0 |
+| Post-send | ~409 Mi | ~154 Mi | ~0.00 | Horizon worker RSS ~82 Mi after PDF job; no OOM |
+| Idle (+45s) | ~403 Mi | ~154 Mi | ~0.00 | Swap flat — not growing |
+
+Findings:
+
+- Task 022’s “~780 Mi swap” was a **unit misread** (~780 **Ki** historically / current ~154 Mi used of 1.0 Gi).
+- Swap is **not actively thrashing** (`si`/`so` ≈ 0 across samples).
+- Largest `VmSwap` holder: **MySQL** (~112 Mi) — historical pressure pages; Horizon/PHP-FPM/Redis not the primary swap consumers.
+- No Droplet resize, no Horizon worker increase, no MySQL/PHP-FPM memory retune required.
+
+### Config cache permission note
+
+`php artisan config:cache` as `adman` can write `bootstrap/cache/config.php` as mode `600`. PHP-FPM (`www-data`) then cannot read it → HTTP 500 on `/up` and `/login`. Always ensure `adman:www-data` ownership and `664` on cached config after rebuild.
 
 ---
 
@@ -541,11 +591,9 @@ Load: ~0.10 / 0.06 / 0.04
 
 ---
 
-## Next step (Task 022+)
+## Next step
 
-Background processing is live. Email transport: Resend (`resend/resend-php`). Provide a production `RESEND_API_KEY` to finish controlled send verification. Then OpenAI / WhatsApp. Do not raise Horizon concurrency without memory evidence.
-
-Horizon config is on GitHub `main` (`18bd93b`). Local docs may still include uncommitted `016` updates.
+Resend production email path is verified (Task 023). Remaining external integrations: OpenAI → WhatsApp (when ready). Do not raise Horizon concurrency without sustained memory-pressure evidence. Resend delivery webhooks/bounce handling remain deferred.
 
 ---
 
