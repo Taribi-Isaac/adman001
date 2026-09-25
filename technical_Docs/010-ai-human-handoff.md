@@ -202,8 +202,34 @@ Inbound WhatsApp files are stored privately and acknowledged truthfully (team wi
 
 ## External setup
 
-1. Obtain an OpenAI-compatible API key (or set `ADMAN_AI_PROVIDER=fake` locally)
-2. Configure env vars above
-3. Enable AI + customer responses in Settings → AI
-4. Ensure WhatsApp Cloud API credentials work for **text** messages (session window)
-5. Run queue workers / Horizon
+1. Obtain an OpenAI API key (Chat Completions compatible). Never commit it.
+2. On the server `.env` only:
+
+```env
+ADMAN_AI_ENABLED=true
+ADMAN_AI_PROVIDER=openai
+ADMAN_AI_API_KEY=<server secret>
+ADMAN_AI_BASE_URL=https://api.openai.com/v1
+ADMAN_AI_MODEL=gpt-4o-mini
+ADMAN_AI_TIMEOUT=45
+```
+
+3. `umask 002 && php artisan config:cache` (ensure `bootstrap/cache/config.php` is `adman:www-data` `664`) then `sudo systemctl restart adman-horizon`
+4. Enable org switches in Settings → AI (`ai_enabled`, `ai_customer_responses_enabled`)
+5. WhatsApp Cloud API must be available for inbound session messages (AI auto-reply is WhatsApp-inbound only today)
+6. Confirm `ADMAN_AI_PROVIDER` is never `fake` in production (binding falls through to OpenAI-compatible provider; production-check blocks `fake`)
+
+### Task 024 status (2026-09-25)
+
+| Item | State |
+|------|--------|
+| Architecture | Unchanged (Task 010) — OpenAI-compatible Chat Completions via Laravel HTTP |
+| Model | `gpt-4o-mini` (existing default — preserved) |
+| Provider binding | Production binds `OpenAiCompatibleProvider`; `fake` forbidden |
+| Missing-key behavior | Provider returns safe failure — **no fabricated customer replies** |
+| `ADMAN_AI_API_KEY` on production | **absent** — activation blocked on external credential |
+| `ADMAN_AI_ENABLED` | remains `false` until key is configured |
+| Business AI flags | remain `false` until activation |
+| WhatsApp | `ADMAN_WHATSAPP_ENABLED=false` — full inbound AI path also needs WhatsApp (separate task) |
+
+Do **not** set `ADMAN_AI_ENABLED=true` without a real key.
