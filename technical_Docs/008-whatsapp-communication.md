@@ -7,9 +7,9 @@ WhatsApp is ADMAN’s second external communication channel, built on the Commun
 **Flows**
 
 - Outbound: Staff action → pending `Message` → queue → WhatsApp Cloud API adapter → provider message id → status webhooks
-- Inbound: Verified webhook → identity → conversation → inbound `Message` (no AI reply)
+- Inbound: Verified webhook → identity → conversation → inbound `Message` → (when AI customer responses enabled) `ProcessInboundAiMessage` → OpenAI + tools → session WhatsApp reply
 
-Recurring invoice generation does **not** auto-send WhatsApp. AI does **not** reply.
+Recurring invoice generation does **not** auto-send WhatsApp.
 
 ---
 
@@ -25,16 +25,18 @@ WhatsAppDeliveryAdapter
 WhatsAppCloudApiAdapter  →  Meta Graph / Cloud API
 ```
 
-Inbound:
+Inbound (+ AI when enabled):
 
 ```text
 POST /webhooks/whatsapp
         ↓
 Signature verification (X-Hub-Signature-256)
         ↓
-WhatsAppInboundService
+WhatsAppInboundService → Message (+ ProcessInboundAiMessage)
         ↓
-CommunicationIdentity / Conversation / Message
+AiService → OpenAiCompatibleProvider → controlled tools
+        ↓
+WhatsAppOutboundService::queueAiSessionReply → sendText
 ```
 
 ---
@@ -43,10 +45,11 @@ CommunicationIdentity / Conversation / Message
 
 | Implemented in ADMAN | Requires Meta / ops setup |
 |----------------------|---------------------------|
-| Adapter, queue, webhook, UI, RBAC, tests (Http::fake) | WhatsApp Business / Meta app |
-| Template name config | Approved message templates |
-| Opt-in flag on Contact | Real customer opt-in process |
-| Secure document links in templates | Production webhook URL + tokens |
+| Adapter, queue, webhook, UI, RBAC, tests (Http::fake) | Meta Business Portfolio + WhatsApp Business Account |
+| Template name config | WhatsApp Cloud API app + approved templates |
+| Opt-in flag on Contact | Production phone number + permanent system-user token |
+| Secure document links in templates | Webhook URL + verify token + app secret |
+| AI inbound session replies (Task 010/024B) | `messages` webhook subscription |
 
 ---
 
@@ -59,9 +62,47 @@ Placeholders in `.env.example` (never commit secrets):
 - `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`
 - `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`
 - `WHATSAPP_TEMPLATE_LANGUAGE`
-- `WHATSAPP_TEMPLATE_QUOTE`, `WHATSAPP_TEMPLATE_INVOICE`, `WHATSAPP_TEMPLATE_PAYMENT_ACK`
+- `WHATSAPP_TEMPLATE_QUOTE`, `WHATSAPP_TEMPLATE_INVOICE`, `WHATSAPP_TEMPLATE_INVOICE_REMINDER`, `WHATSAPP_TEMPLATE_PAYMENT_ACK`
+- `WHATSAPP_INBOUND_MEDIA_MAX_BYTES`
 
 Business setting: `outbound_whatsapp_enabled` (org kill switch). Secrets stay in env.
+
+### Production webhook URL
+
+```text
+https://adman.raslordeckltd.com/webhooks/whatsapp
+```
+
+- `GET` — Meta verify (`hub.mode=subscribe`, `hub.verify_token`, `hub.challenge`)
+- `POST` — events; requires valid `X-Hub-Signature-256`
+
+### Meta configuration path (current Cloud API docs)
+
+1. Meta Business Portfolio → WhatsApp Business Account → WhatsApp-enabled phone number  
+2. Meta Developer App → add **WhatsApp** product  
+3. Generate a **permanent** system-user token with `whatsapp_business_messaging` + `whatsapp_business_management`  
+4. Copy **Phone number ID** (and WABA id) into env  
+5. App Dashboard → WhatsApp → Configuration: set Callback URL to the production webhook above; set Verify Token to match `WHATSAPP_WEBHOOK_VERIFY_TOKEN`  
+6. Subscribe to the **`messages`** field  
+7. Ensure App Secret matches `WHATSAPP_APP_SECRET` (signature validation)  
+8. Approve outbound templates matching configured names (required for business-initiated messages outside the 24-hour customer-care window)
+
+Official references: [Cloud API Get Started](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started/), [Set up webhooks](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/set-up-webhooks/).
+
+### Task 025 status (2026-09-25)
+
+| Item | State |
+|------|--------|
+| Architecture | Unchanged (Task 008 + AI path Task 010) |
+| Production commit | `7c4f34e` (+ docs after Task 025) |
+| `ADMAN_WHATSAPP_ENABLED` | **false** |
+| Access token / phone number ID / verify token / app secret | **absent** on production |
+| Webhook HTTPS endpoint | Live; unsigned POST → **403**; bad verify token → **403** |
+| Business `outbound_whatsapp_enabled` | true (org flag ready; env still disabled) |
+| OpenAI | Already active (Task 024B) |
+| End-to-end WhatsApp ↔ AI | **Blocked** on Meta credentials + webhook subscription |
+
+Do **not** set `ADMAN_WHATSAPP_ENABLED=true` until token, phone number ID, verify token, and app secret are present and webhook verification succeeds.
 
 ---
 
@@ -184,13 +225,28 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 
 ## External setup checklist
 
-1. Meta Business + WhatsApp Cloud API app  
-2. Phone number ID + permanent access token  
-3. Create/approve templates (`adman_quote`, `adman_invoice`, `adman_payment_ack` or configured names)  
-4. Webhook URL: `https://<host>/webhooks/whatsapp`  
-5. Verify token + app secret in env  
-6. Subscribe to `messages` field  
-7. Enable org WhatsApp in Business settings; mark customer opt-in  
-8. Run queue workers / Horizon  
+1. Meta Business Portfolio + WhatsApp Business Account + WhatsApp Cloud API app  
+2. Permanent system-user access token + Phone number ID (+ WABA id)  
+3. Create/approve templates (`adman_quote`, `adman_invoice`, `adman_invoice_reminder`, `adman_payment_ack` or configured names)  
+4. Webhook URL: `https://adman.raslordeckltd.com/webhooks/whatsapp`  
+5. Set `WHATSAPP_WEBHOOK_VERIFY_TOKEN` + `WHATSAPP_APP_SECRET` in server `.env` only  
+6. Subscribe to `messages` field in Meta App Dashboard → WhatsApp → Configuration  
+7. Set `ADMAN_WHATSAPP_ENABLED=true`, `config:cache` (group-readable), restart Horizon  
+8. Confirm org `outbound_whatsapp_enabled`; mark controlled test contact `whatsapp_opt_in` for template sends  
+9. Controlled outbound → controlled inbound → AI reply → payment claim / handoff verification  
 
-This documentation does not claim Meta setup was completed in the development environment.
+### Activation procedure (after credentials exist)
+
+```bash
+# On Droplet — secrets already in .env; never echo them
+umask 002
+php artisan config:cache
+sudo chown adman:www-data bootstrap/cache/config.php
+sudo chmod 664 bootstrap/cache/config.php
+sudo systemctl restart adman-horizon
+
+# Local verify challenge (replace TOKEN/CHALLENGE with the values Meta will use — do not log secrets)
+curl -sS "https://adman.raslordeckltd.com/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=TOKEN&hub.challenge=CHALLENGE"
+```
+
+Then complete Meta webhook subscription and run controlled E2E tests before customer traffic.

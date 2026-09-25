@@ -6,12 +6,12 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 
 ---
 
-## Status (Task 024B) — OpenAI production AI active (WhatsApp path pending)
+## Status (Task 025) — WhatsApp activation awaiting Meta credentials
 
 | Item | State |
 |------|--------|
 | Droplet | `165.232.103.182` (`lon1`), hostname `adman-prod` |
-| App | `/var/www/adman` @ `main` (see latest Task 024B commit) |
+| App | `/var/www/adman` @ `main` / `7c4f34e…` (+ Task 025 docs) |
 | Production URL | **`https://adman.raslordeckltd.com`** |
 | TLS | Let's Encrypt active; HTTP→HTTPS |
 | Horizon | **systemd `adman-horizon.service`** — 1 worker, `maxProcesses=1`, queue `default` |
@@ -19,7 +19,8 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 | Runtime user | `adman` (group `www-data`) — not root |
 | `adman:production-check --strict` | **PASS** |
 | Email | **Resend active** (Task 023) |
-| AI | **OpenAI active** — provider verified; controlled tools/safety verified (Task 024B). Full customer WhatsApp journey still pending |
+| AI | **OpenAI active** (Task 024B) |
+| WhatsApp | **Architecture ready**; production Meta credentials **absent** — `ADMAN_WHATSAPP_ENABLED=false`. Webhook endpoint live and rejecting invalid traffic |
 
 ### Task 017 security foundation (unchanged)
 
@@ -626,9 +627,36 @@ Load: ~0.10 / 0.06 / 0.04
 
 ---
 
+## Task 025 — WhatsApp Cloud API activation (externally blocked 2026-09-25)
+
+| Item | State |
+|------|--------|
+| Architecture | Task 008 preserved — `WhatsAppCloudApiAdapter`, webhook, inbound/outbound services, AI handoff via Task 010 |
+| Webhook URL | `https://adman.raslordeckltd.com/webhooks/whatsapp` |
+| Env vars | `ADMAN_WHATSAPP_ENABLED`, `WHATSAPP_*` (see `.env.example` placeholders) |
+| Access token present | **no** |
+| Phone number ID configured | **no** |
+| Verify token configured | **no** |
+| App secret configured | **no** |
+| `ADMAN_WHATSAPP_ENABLED` | **false** (correct until secrets exist) |
+| GET verify (no/wrong token) | **403** |
+| POST without signature | **403** `Invalid signature` |
+| Business `outbound_whatsapp_enabled` | true |
+| OpenAI / Resend | Unchanged / healthy |
+| E2E WhatsApp↔AI | **Not run** — blocked on Meta credentials |
+
+### Operator action to finish Task 025
+
+1. Complete Meta Business + WhatsApp Cloud API setup (permanent token, phone number ID, app secret).
+2. Put secrets only in `/var/www/adman/.env` (never chat/Git).
+3. Configure Meta webhook Callback URL + Verify Token; subscribe to `messages`.
+4. Set `ADMAN_WHATSAPP_ENABLED=true`, rebuild config cache (group-readable), restart Horizon.
+5. Controlled outbound + inbound + AI safety E2E (payment claim / handoff) before customer traffic.
+6. Approve matching message templates for business-initiated sends outside the 24h window.
+
 ## Next step
 
-OpenAI production provider and controlled AI safety verification are complete (Task 024B). Remaining for the full customer journey: **WhatsApp production activation**. Do not raise Horizon concurrency without sustained memory-pressure evidence. Resend delivery webhooks remain deferred.
+WhatsApp production activation awaits Meta credentials and webhook subscription (Task 025). OpenAI and Resend remain active. Do not raise Horizon concurrency without sustained memory-pressure evidence.
 
 ---
 

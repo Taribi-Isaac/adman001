@@ -28,7 +28,7 @@ When documentation and code diverge, **the current implementation/code takes pre
 | `005-payments-domain.md` | Manual payments, payment claims, acknowledgements |
 | `006-recurring-billing-domain.md` | Recurring invoice schedules |
 | `007-email-delivery.md` | Outbound email document delivery |
-| `008-whatsapp-communication.md` | WhatsApp Cloud API inbound/outbound |
+| `008-whatsapp-communication.md` | WhatsApp Cloud API inbound/outbound + production activation checklist |
 | `009-invoice-reminders.md` | Invoice reminder automation |
 | `010-ai-human-handoff.md` | Controlled AI tools and human handoff |
 | `011-production-readiness.md` | Production safety checks and hardening |
