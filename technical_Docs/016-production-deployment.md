@@ -6,21 +6,21 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 
 ---
 
-## Status (Task 025) — WhatsApp activation awaiting Meta credentials
+## Status (Task 026) — Web runtime restored; Meta webhook GET ready
 
 | Item | State |
 |------|--------|
 | Droplet | `165.232.103.182` (`lon1`), hostname `adman-prod` |
-| App | `/var/www/adman` @ `main` / `7c4f34e…` (+ Task 025 docs) |
+| App | `/var/www/adman` @ `main` |
 | Production URL | **`https://adman.raslordeckltd.com`** |
 | TLS | Let's Encrypt active; HTTP→HTTPS |
-| Horizon | **systemd `adman-horizon.service`** — 1 worker, `maxProcesses=1`, queue `default` |
-| Scheduler | **systemd `adman-scheduler.timer`** → `schedule:run` every minute |
+| Horizon | **systemd `adman-horizon.service`** — 1 worker |
 | Runtime user | `adman` (group `www-data`) — not root |
+| Config cache | `bootstrap/cache/config.php` `adman:www-data` **640**; `.env` **600** |
 | `adman:production-check --strict` | **PASS** |
-| Email | **Resend active** (Task 023) |
-| AI | **OpenAI active** (Task 024B) |
-| WhatsApp | **Architecture ready**; production Meta credentials **absent** — `ADMAN_WHATSAPP_ENABLED=false`. Webhook endpoint live and rejecting invalid traffic |
+| Email | **Resend active** |
+| AI | **OpenAI active** |
+| WhatsApp | **Disabled** (`ADMAN_WHATSAPP_ENABLED=false`); Meta GET handshake verified server-side; App Secret / Access Token / Phone Number ID still missing |
 
 ### Task 017 security foundation (unchanged)
 
@@ -512,7 +512,38 @@ Findings:
 
 ### Config cache permission note
 
-`php artisan config:cache` as `adman` can write `bootstrap/cache/config.php` as mode `600`. PHP-FPM (`www-data`) then cannot read it → HTTP 500 on `/up` and `/login`. Always ensure `adman:www-data` ownership and `664` on cached config after rebuild.
+`php artisan config:cache` as `adman` can write `bootstrap/cache/config.php` as mode `600`, or the cache file may be missing after `config:clear`. PHP-FPM (`www-data`) then cannot load config (especially when `.env` remains mode `600` and is intentionally unreadable by `www-data`) → HTTP 500 on `/login` and Meta webhook GET verification.
+
+**Intended production model (Task 026):**
+
+| Path | Owner:group | Mode | Why |
+|------|-------------|------|-----|
+| `.env` | `adman:www-data` | `600` | Secrets stay owner-only; never rely on PHP-FPM reading `.env` |
+| `bootstrap/cache/config.php` | `adman:www-data` | `640` | PHP-FPM reads cached config; group-readable, not world-readable, not group-writable |
+
+Rebuild procedure:
+
+```bash
+cd /var/www/adman
+umask 027
+php artisan config:cache
+php artisan route:cache
+sudo chown adman:www-data bootstrap/cache/config.php bootstrap/cache/routes-v7.php
+sudo chmod 640 bootstrap/cache/config.php bootstrap/cache/routes-v7.php
+sudo systemctl reload php8.4-fpm
+sudo systemctl restart adman-horizon
+```
+
+Do **not** make `.env` world-readable or group-readable to “fix” FPM. Always ship a readable config cache instead.
+
+### WhatsApp webhook GET handshake
+
+- Callback URL: `https://adman.raslordeckltd.com/webhooks/whatsapp`
+- Meta sends `GET` with `hub.mode=subscribe`, `hub.verify_token`, `hub.challenge`
+- ADMAN returns HTTP 200 + raw challenge (`text/plain`) when the token matches `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
+- Invalid token → HTTP 403 (not 500)
+
+GET verification works even while `ADMAN_WHATSAPP_ENABLED=false`. Keep WhatsApp disabled until App Secret, Access Token, and Phone Number ID are configured.
 
 ## Task 024 — OpenAI AI activation (completed via Task 024B, 2026-09-25)
 
@@ -654,9 +685,29 @@ Load: ~0.10 / 0.06 / 0.04
 5. Controlled outbound + inbound + AI safety E2E (payment claim / handoff) before customer traffic.
 6. Approve matching message templates for business-initiated sends outside the 24h window.
 
+## Task 026 — Config-cache restore & Meta webhook GET ready (2026-09-26)
+
+| Item | State |
+|------|--------|
+| Root cause | Missing `bootstrap/cache/config.php` + `.env` mode `600` → PHP-FPM could not load APP_KEY/config → HTTPS 500 |
+| Fix | Rebuilt config/route cache as `adman:www-data` mode **`640`**; left `.env` at **`600`** |
+| `/up` / `/login` | **200** |
+| Invalid webhook GET | **403** |
+| Valid Meta-style webhook GET | **200** + exact challenge (`text/plain`) |
+| `ADMAN_WHATSAPP_ENABLED` | **false** (credentials incomplete) |
+| Meta Dashboard “Verify and save” | Operator action — ADMAN handshake verified server-side; retry Meta UI now |
+
+### Remaining before WhatsApp E2E
+
+- `WHATSAPP_APP_SECRET`
+- `WHATSAPP_ACCESS_TOKEN`
+- `WHATSAPP_PHONE_NUMBER_ID`
+- Meta webhook subscription (`messages`) after Verify and save
+- Approved templates for business-initiated sends outside the 24h window
+
 ## Next step
 
-WhatsApp production activation awaits Meta credentials and webhook subscription (Task 025). OpenAI and Resend remain active. Do not raise Horizon concurrency without sustained memory-pressure evidence.
+Retry Meta **Verify and save** with Callback URL `https://adman.raslordeckltd.com/webhooks/whatsapp` and the existing production verify token. Then supply App Secret + Access Token + Phone Number ID before setting `ADMAN_WHATSAPP_ENABLED=true` and running Task 025 E2E.
 
 ---
 

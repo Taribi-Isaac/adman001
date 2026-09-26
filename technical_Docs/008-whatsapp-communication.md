@@ -231,22 +231,7 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 4. Webhook URL: `https://adman.raslordeckltd.com/webhooks/whatsapp`  
 5. Set `WHATSAPP_WEBHOOK_VERIFY_TOKEN` + `WHATSAPP_APP_SECRET` in server `.env` only  
 6. Subscribe to `messages` field in Meta App Dashboard → WhatsApp → Configuration  
-7. Set `ADMAN_WHATSAPP_ENABLED=true`, `config:cache` (group-readable), restart Horizon  
-8. Confirm org `outbound_whatsapp_enabled`; mark controlled test contact `whatsapp_opt_in` for template sends  
-9. Controlled outbound → controlled inbound → AI reply → payment claim / handoff verification  
-
-### Activation procedure (after credentials exist)
-
-```bash
-# On Droplet — secrets already in .env; never echo them
-umask 002
-php artisan config:cache
-sudo chown adman:www-data bootstrap/cache/config.php
-sudo chmod 664 bootstrap/cache/config.php
-sudo systemctl restart adman-horizon
-
-# Local verify challenge (replace TOKEN/CHALLENGE with the values Meta will use — do not log secrets)
-curl -sS "https://adman.raslordeckltd.com/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=TOKEN&hub.challenge=CHALLENGE"
-```
-
-Then complete Meta webhook subscription and run controlled E2E tests before customer traffic.
+3. `umask 027 && php artisan config:cache && php artisan route:cache` then `chown adman:www-data` + `chmod 640` on `bootstrap/cache/config.php` (and routes cache); reload PHP-FPM; restart Horizon. Keep `.env` at mode `600` (do not make it group-readable).
+4. Confirm org `outbound_whatsapp_enabled`; mark controlled test contact `whatsapp_opt_in` for template sends  
+5. Meta Dashboard → WhatsApp → Configuration: Callback URL `https://adman.raslordeckltd.com/webhooks/whatsapp`, Verify Token = exact `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, then **Verify and save** + subscribe to `messages`
+6. Controlled outbound → controlled inbound → AI reply → payment claim / handoff verification
