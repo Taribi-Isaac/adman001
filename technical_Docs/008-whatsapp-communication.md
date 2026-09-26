@@ -228,10 +228,9 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 1. Meta Business Portfolio + WhatsApp Business Account + WhatsApp Cloud API app  
 2. Permanent system-user access token + Phone number ID (+ WABA id)  
 3. Create/approve templates (`adman_quote`, `adman_invoice`, `adman_invoice_reminder`, `adman_payment_ack` or configured names)  
-4. Webhook URL: `https://adman.raslordeckltd.com/webhooks/whatsapp`  
-5. Set `WHATSAPP_WEBHOOK_VERIFY_TOKEN` + `WHATSAPP_APP_SECRET` in server `.env` only  
-6. Subscribe to `messages` field in Meta App Dashboard → WhatsApp → Configuration  
-3. `umask 027 && php artisan config:cache && php artisan route:cache` then `chown adman:www-data` + `chmod 640` on `bootstrap/cache/config.php` (and routes cache); reload PHP-FPM; restart Horizon. Keep `.env` at mode `600` (do not make it group-readable).
-4. Confirm org `outbound_whatsapp_enabled`; mark controlled test contact `whatsapp_opt_in` for template sends  
-5. Meta Dashboard → WhatsApp → Configuration: Callback URL `https://adman.raslordeckltd.com/webhooks/whatsapp`, Verify Token = exact `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, then **Verify and save** + subscribe to `messages`
-6. Controlled outbound → controlled inbound → AI reply → payment claim / handoff verification
+4. Set `WHATSAPP_WEBHOOK_VERIFY_TOKEN` + `WHATSAPP_APP_SECRET` (+ access token / phone number ID) in server `.env` only  
+5. Rebuild Laravel config cache with least privilege (`umask 027`, `config.php` / routes cache `adman:www-data` **640**); keep `.env` at **600**; reload PHP-FPM; restart Horizon  
+6. Meta Dashboard → WhatsApp → Configuration: Callback URL `https://adman.raslordeckltd.com/webhooks/whatsapp`, Verify Token = exact `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, then **Verify and save** + subscribe to `messages`  
+7. Set `ADMAN_WHATSAPP_ENABLED=true` only after credentials are complete; rebuild config cache again  
+8. Confirm org `outbound_whatsapp_enabled`; mark controlled test contact `whatsapp_opt_in` for template sends  
+9. Controlled outbound → controlled inbound → AI reply → payment claim / handoff verification  
