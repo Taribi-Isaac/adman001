@@ -94,21 +94,24 @@ laravel_optimize() {
   chown adman:www-data .env || true
 
   if [[ -f bootstrap/cache/config.php ]]; then
-    chown adman:www-data bootstrap/cache/config.php
-    chmod 640 bootstrap/cache/config.php
+    sudo chown adman:www-data bootstrap/cache/config.php
+    sudo chmod 640 bootstrap/cache/config.php
   fi
   if [[ -f bootstrap/cache/routes-v7.php ]]; then
-    chown adman:www-data bootstrap/cache/routes-v7.php
-    chmod 640 bootstrap/cache/routes-v7.php
+    sudo chown adman:www-data bootstrap/cache/routes-v7.php
+    sudo chmod 640 bootstrap/cache/routes-v7.php
   fi
 
   # Keep storage/bootstrap dirs writable by deploy user + FPM; do not rewrite
-  # private upload file modes beyond ownership.
-  chown -R adman:www-data storage bootstrap/cache
+  # private upload file modes beyond ownership. Some paths are www-data-owned.
+  sudo chown -R adman:www-data storage bootstrap/cache
   find storage bootstrap/cache -type d -exec chmod 775 {} \;
-  [[ -f bootstrap/cache/config.php ]] && chmod 640 bootstrap/cache/config.php
-  [[ -f bootstrap/cache/routes-v7.php ]] && chmod 640 bootstrap/cache/routes-v7.php
+  [[ -f bootstrap/cache/config.php ]] && sudo chmod 640 bootstrap/cache/config.php
+  [[ -f bootstrap/cache/routes-v7.php ]] && sudo chmod 640 bootstrap/cache/routes-v7.php
+  [[ -f bootstrap/cache/config.php ]] && sudo chown adman:www-data bootstrap/cache/config.php
+  [[ -f bootstrap/cache/routes-v7.php ]] && sudo chown adman:www-data bootstrap/cache/routes-v7.php
   chmod 600 .env
+  chown adman:www-data .env || true
 }
 
 restart_runtime() {
