@@ -89,17 +89,16 @@ https://adman.raslordeckltd.com/webhooks/whatsapp
 
 Official references: [Cloud API Get Started](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started/), [Set up webhooks](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/set-up-webhooks/).
 
-### Task 027 status (2026-09-26)
+### Task 028 status (2026-09-26) — PRODUCTION VERIFIED
 
 | Item | State |
 |------|--------|
 | Production enablement | `ADMAN_WHATSAPP_ENABLED=true` |
-| Secrets | Access token, phone number ID, app secret, verify token — present (server `.env` only) |
-| Meta callback | Confirmed via Graph on phone number → `/webhooks/whatsapp` |
-| GET verify | 200 with matching token; 403 otherwise |
-| POST signature | App secret enforced; invalid/missing → 403 |
-| Inbound→AI→outbound jobs | Proven with signed webhook probe + Horizon |
-| Live phone delivery | **Pending** — operator must message `+234 704 723 0179` from a real controlled WhatsApp |
+| Real Meta inbound | Confirmed (`wamid.HBg…`) |
+| AI → OpenAI → outbound | Confirmed via Horizon jobs |
+| Provider acceptance + delivery status | Outbound messages carry Meta ids and reach ADMAN status **`delivered`** |
+| GET verify / POST signature | 200 with valid token/signature; 403 otherwise |
+| Live phone path | Verified in production against business number `+234 704 723 0179` |
 
 ---
 

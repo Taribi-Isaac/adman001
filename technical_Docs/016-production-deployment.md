@@ -6,7 +6,7 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 
 ---
 
-## Status (Task 027) — WhatsApp enabled; live phone E2E delivery pending
+## Status (Task 028) — WhatsApp production verified (real device path)
 
 | Item | State |
 |------|--------|
@@ -16,7 +16,7 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 | Config cache | `config.php` `adman:www-data` **640**; `.env` **600** |
 | Email | **Resend active** |
 | AI | **OpenAI active** |
-| WhatsApp | **`ADMAN_WHATSAPP_ENABLED=true`** — credentials loaded; Meta callback configured; signed inbound→AI→outbound path verified; **awaiting controlled real-phone inbound** for delivery confirmation |
+| WhatsApp | **PRODUCTION VERIFIED** — real Meta inbound (`wamid.HBg…`) → AI → outbound with provider id + status `delivered` |
 | Business WhatsApp number | `+234 704 723 0179` (display; Raslordeck) |
 
 ### Task 017 security foundation (unchanged)
@@ -727,9 +727,37 @@ Load: ~0.10 / 0.06 / 0.04
 
 Until step 2 succeeds, do not treat customer WhatsApp delivery as fully proven.
 
+## Task 028 — Real WhatsApp device verification (completed 2026-09-26)
+
+| Item | State |
+|------|--------|
+| Real inbound | Multiple Meta webhooks with `wamid.HBg…` persisted |
+| AI processing | `AiMessageProcessing` **completed** (1 row per inbound; idempotent) |
+| Real outbound | AI replies with Meta provider ids (`wamid.HBg…`); status progressed to **`delivered`** |
+| Example pair | inbound `38` → processing → outbound `39` (`delivered`, `sent_at` set) |
+| Active conversation | mode **AI** after closure checks |
+| Signature security | valid 200 / invalid+missing 403 |
+| Payment claim regression | `pending_verification`; invoice unpaid; confirmed payments unchanged |
+| Human handoff regression | human mode + AI skip; restored to AI |
+| Resources | Available RAM ~374 Mi; swap ~147 Mi; load ~0.07; Horizon 1 worker; failed_jobs=0 |
+| Classification | **PRODUCTION VERIFIED** |
+
+### Controlled production test procedure (operators)
+
+1. From an authorized personal WhatsApp, message `+234 704 723 0179` (e.g. `Hello ADMAN`).
+2. Confirm ADMAN records inbound (`wamid.HBg…`) and AI outbound (`delivered` with provider id) within seconds.
+3. Optional: ask a general business question; trigger human handoff; create a payment claim (must stay `pending_verification`).
+
+### Remaining WhatsApp limitations (not defects)
+
+- Approved Meta templates still required for business-initiated sends outside the 24-hour customer-care window
+- No OCR / media AI / broadcasts
+- Unknown WhatsApp senders do not auto-become Customers
+- Delivery/read status persistence is best-effort via existing status webhooks (outbound `delivered` observed in production)
+
 ## Next step
 
-Operator sends a controlled inbound WhatsApp to `+234 704 723 0179`, then confirm AI reply delivery on-device. Keep Horizon at 1 worker.
+WhatsApp production path is verified. Keep Horizon at 1 worker. Next integrations (if any) are outside this activation phase.
 
 ---
 
