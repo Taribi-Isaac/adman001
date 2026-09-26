@@ -789,8 +789,8 @@ Production tracks **`origin/main` only**. `develop` is never auto-deployed.
 ### CI — `.github/workflows/tests.yml`
 
 | Trigger | `push` to `main`, all `pull_request`s |
-| Steps | Checkout → PHP **8.4** + Node 22 → `composer install` → `.env` + key → `npm ci` → `npm run build` → `composer test` (Pint + PHPStan + Pest) |
-| Notes | No MySQL service in CI — Pest uses `sqlite :memory:` from `phpunit.xml`. Production still uses MySQL on the Droplet. Full `composer ci:check` (oxfmt + Vue `types:check`) is deferred until a dedicated frontend hygiene pass; those checks currently fail on the existing tree. |
+| Steps | Checkout → PHP **8.4** + Node 22 → `composer install` → `.env` + key → `npm ci` → `npm run build` → Pint (`--test`) → `php artisan test` (Pest) |
+| Notes | No MySQL service in CI — Pest uses `sqlite :memory:` from `phpunit.xml`. Production still uses MySQL on the Droplet. Full `composer ci:check` / `composer test` (PHPStan + Vue oxfmt/types) is deferred until a dedicated hygiene pass; those checks currently fail on the existing tree. |
 | Failure | Workflow fails; deploy does **not** run |
 
 `composer ci:check` runs frontend check, PHPStan, Pint, and Pest.

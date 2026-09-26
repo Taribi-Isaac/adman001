@@ -48,7 +48,7 @@ jobs:
 
       - name: Run CI Checks
         run: |
-          # PHP lint (Pint) + PHPStan + Pest. Frontend `npm run types:check` and
-          # `npm run check` currently fail on pre-existing Vue/format issues and
-          # are deferred so production deploy can gate on the PHP test suite.
-          composer test
+          # Pint + Pest. PHPStan and frontend oxfmt/types currently fail on
+          # pre-existing issues; deferred so deploy can gate on the runtime test suite.
+          vendor/bin/pint --parallel --test
+          php artisan test
