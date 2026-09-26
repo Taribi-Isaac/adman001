@@ -34,7 +34,7 @@ When documentation and code diverge, **the current implementation/code takes pre
 | `011-production-readiness.md` | Production safety checks and hardening |
 | `012-staging-deployment-and-uat.md` | Staging/UAT plan, local pre-deploy verification (Task 014), smoke/UAT checklists |
 | `015-document-attachments-communication-ai-knowledge.md` | PDF attachments (email/WhatsApp), simplified PDFs, communication settings, AI knowledge, inbound media |
-| `016-production-deployment.md` | Production Droplet provisioning, SSH/firewall/swap, deploy runbook (Task 017+) |
+| `016-production-deployment.md` | Production Droplet provisioning, SSH/firewall/swap, deploy runbook, CI/CD (Task 017+, Task 029) |
 | `scripts/` | Operator helpers for production foundation (e.g. Task 017 Phase B). Run intentionally on the Droplet; not application runtime. |
 
 ## Maintenance

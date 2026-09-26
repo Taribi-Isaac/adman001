@@ -757,7 +757,143 @@ Until step 2 succeeds, do not treat customer WhatsApp delivery as fully proven.
 
 ## Next step
 
-WhatsApp production path is verified. Keep Horizon at 1 worker. Next integrations (if any) are outside this activation phase.
+WhatsApp production path is verified. Keep Horizon at 1 worker. Next priority: CI/CD (Task 029).
+
+---
+
+## Task 029 — Production CI/CD (GitHub Actions → Droplet)
+
+### Pipeline model
+
+```text
+feature / develop work
+        ↓
+PR / merge into main
+        ↓
+GitHub Actions workflow: tests
+        ↓ (on success, push to main only)
+GitHub Actions workflow: deploy-production
+        ↓ SSH (deploy key)
+DigitalOcean Droplet (adman@…)
+        ↓
+scripts/deploy-production.sh
+        ↓
+git fetch → checkout approved main SHA
+composer / npm / Laravel optimize / Horizon restart
+        ↓
+health verification
+```
+
+Production tracks **`origin/main` only**. `develop` is never auto-deployed.
+
+### CI — `.github/workflows/tests.yml`
+
+| Trigger | `push` to `main`, all `pull_request`s |
+| Steps | Checkout → PHP 8.3 + Node 22 → `composer setup` → `composer ci:check` |
+| Failure | Workflow fails; deploy does **not** run |
+
+`composer ci:check` runs frontend check, PHPStan, Pint, and Pest.
+
+### Deploy — `.github/workflows/deploy-production.yml`
+
+| Trigger | (1) `workflow_run` after **tests** succeeds for a **push** to `main`; (2) `workflow_dispatch` with input `confirm=deploy` |
+| Concurrency | `group: production-deploy`, `cancel-in-progress: false` (second deploy waits; does not cancel the first) |
+| Mechanism | SSH + pipe `scripts/deploy-production.sh`; server uses **git** (no rsync of app tree; `.env` never leaves the server) |
+
+### Required GitHub Actions secrets (names only)
+
+| Secret | Purpose |
+|--------|---------|
+| `DEPLOY_HOST` | Droplet IP / hostname |
+| `DEPLOY_USER` | SSH user (`adman`) |
+| `DEPLOY_SSH_KEY` | Private key for the Actions deploy key |
+| `DEPLOY_SSH_KNOWN_HOSTS` | `ssh-keyscan` output for the host |
+
+Application secrets (OpenAI, Resend, WhatsApp, `APP_KEY`, DB) stay in the server `.env` only. Do **not** put them in GitHub Actions.
+
+### Server-side requirements
+
+- App root: `/var/www/adman`
+- Deploy user `adman` with passwordless sudo for `systemctl reload php8.4-fpm`, `systemctl restart adman-horizon`, and related unit checks
+- Deploy public key in `~adman/.ssh/authorized_keys` (comment `github-actions-deploy`)
+- `.env` present, mode `600`, **gitignored**
+- Node, Composer, PHP 8.4 CLI available to `adman`
+- Horizon unit `adman-horizon` and timer `adman-scheduler.timer`
+
+### Deploy script commands (`scripts/deploy-production.sh`)
+
+Environment: `DEPLOY_SHA=<full commit sha>` (required). Optional: `SKIP_MIGRATE=1`, `APP_DIR`, `HEALTH_URL`.
+
+Sequence:
+
+1. `flock` lock `/tmp/adman-production-deploy.lock`
+2. Assert `.env` exists and is not git-tracked
+3. `git fetch` → `checkout -B main <SHA>` → `reset --hard <SHA>` (**no** `git clean`; untracked `.env` / storage / backups preserved)
+4. `composer install --no-dev --optimize-autoloader`
+5. `npm ci` && `npm run build`
+6. `php artisan migrate --force` (never `migrate:fresh`)
+7. `umask 027` → `config:cache` / `route:cache` / `view:cache` → config/routes cache `640` `adman:www-data`; `.env` restored to `600`
+8. Reload PHP-FPM; `horizon:terminate` + restart `adman-horizon`; confirm scheduler timer active
+9. Verify `/up`, `/login`, `adman:production-check`, `--strict`, Horizon status, config **presence** (Resend / OpenAI / WhatsApp) without printing secrets
+
+### Health verification (after deploy)
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://adman.raslordeckltd.com/up
+curl -sS -o /dev/null -w '%{http_code}\n' https://adman.raslordeckltd.com/login
+cd /var/www/adman
+php artisan adman:production-check
+php artisan adman:production-check --strict
+php artisan horizon:status
+systemctl is-active adman-horizon adman-scheduler.timer
+git rev-parse HEAD   # must match intended origin/main SHA
+```
+
+### Rollback (simple)
+
+1. Identify bad deploy: `cd /var/www/adman && git rev-parse HEAD` and GitHub Actions run for `deploy-production`
+2. Choose previous known-good SHA from `git log --oneline -20` or GitHub `main` history
+3. Re-run deploy for that SHA (preferred: Actions `workflow_dispatch` after checking out that commit on `main` is **not** required — use emergency manual):
+
+```bash
+ssh adman@<host>
+cd /var/www/adman
+DEPLOY_SHA=<known-good-sha> ./scripts/deploy-production.sh
+# or, if script missing on that old tree:
+DEPLOY_SHA=<known-good-sha> bash -s < /path/to/deploy-production.sh
+```
+
+4. Script rebuilds caches, restarts Horizon, re-runs health checks
+5. Confirm `/up`, `/login`, production-check, integrations config presence
+
+Do **not** restore DB unless a migration was the failure mode; take a DB dump before risky migrates. Do not `migrate:fresh`.
+
+### Emergency manual deployment
+
+```bash
+ssh adman@<host>
+cd /var/www/adman
+git fetch origin
+DEPLOY_SHA=$(git rev-parse origin/main)
+DEPLOY_SHA="$DEPLOY_SHA" ./scripts/deploy-production.sh
+```
+
+If Actions is unavailable, the same script is the supported path. Preserve `.env`; never copy secrets into the repo.
+
+### Troubleshooting
+
+| Symptom | Check |
+|---------|--------|
+| Deploy skipped | Was the event a **push** to `main`? Did `tests` succeed? `workflow_run` ignores failed CI and non-push events (e.g. PR-only) |
+| SSH failure | Secrets `DEPLOY_*` present? Deploy pubkey still in `authorized_keys`? Host key in `DEPLOY_SSH_KNOWN_HOSTS`? |
+| Lock error | Another deploy holds `/tmp/adman-production-deploy.lock` — wait or inspect `ps` |
+| HTTP 500 after deploy | Config cache mode — must be `640` readable by `www-data`; `.env` stays `600` (Task 026) |
+| Horizon down | `systemctl status adman-horizon`; `journalctl -u adman-horizon -n 50` |
+| Wrong commit | `git rev-parse HEAD` vs Actions “Deploy target” SHA |
+
+### Security posture during CI/CD
+
+CI/CD must not weaken: key-only SSH, root SSH disabled, UFW, MySQL/Redis localhost-only, `.env` `600`, config cache least-privilege, `APP_DEBUG=false`, Horizon auth, `.git` / private storage not web-accessible.
 
 ---
 
