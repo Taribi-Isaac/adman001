@@ -892,6 +892,23 @@ If Actions is unavailable, the same script is the supported path. Preserve `.env
 | Horizon down | `systemctl status adman-horizon`; `journalctl -u adman-horizon -n 50` |
 | Wrong commit | `git rev-parse HEAD` vs Actions “Deploy target” SHA |
 
+### Task 029 verification record (2026-09-26)
+
+| Item | Result |
+|------|--------|
+| Deployed commit | `82ea006659bb46d0cb017da53d207b65c4ab5e86` |
+| Trigger | `main` push → `tests` success → `deploy-production` |
+| `/up` | 200 |
+| `/login` | 200 |
+| `adman:production-check` | PASS |
+| `adman:production-check --strict` | PASS |
+| Horizon / scheduler | active |
+| MySQL / Redis | localhost-only; health ok |
+| Resend / OpenAI / WhatsApp config | present; WhatsApp enabled |
+| `.env` | mode 600 preserved; untracked backups preserved |
+| Private storage | present; HTTP 404 |
+| Classification | **CI/CD READY** (PHPStan / Vue oxfmt+types still deferred from full `composer ci:check`) |
+
 ### Security posture during CI/CD
 
 CI/CD must not weaken: key-only SSH, root SSH disabled, UFW, MySQL/Redis localhost-only, `.env` `600`, config cache least-privilege, `APP_DEBUG=false`, Horizon auth, `.git` / private storage not web-accessible.
