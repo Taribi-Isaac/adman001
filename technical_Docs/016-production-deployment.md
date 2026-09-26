@@ -6,21 +6,18 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 
 ---
 
-## Status (Task 026) — Web runtime restored; Meta webhook GET ready
+## Status (Task 027) — WhatsApp enabled; live phone E2E delivery pending
 
 | Item | State |
 |------|--------|
 | Droplet | `165.232.103.182` (`lon1`), hostname `adman-prod` |
 | App | `/var/www/adman` @ `main` |
 | Production URL | **`https://adman.raslordeckltd.com`** |
-| TLS | Let's Encrypt active; HTTP→HTTPS |
-| Horizon | **systemd `adman-horizon.service`** — 1 worker |
-| Runtime user | `adman` (group `www-data`) — not root |
-| Config cache | `bootstrap/cache/config.php` `adman:www-data` **640**; `.env` **600** |
-| `adman:production-check --strict` | **PASS** |
+| Config cache | `config.php` `adman:www-data` **640**; `.env` **600** |
 | Email | **Resend active** |
 | AI | **OpenAI active** |
-| WhatsApp | **Disabled** (`ADMAN_WHATSAPP_ENABLED=false`); Meta GET handshake verified server-side; App Secret / Access Token / Phone Number ID still missing |
+| WhatsApp | **`ADMAN_WHATSAPP_ENABLED=true`** — credentials loaded; Meta callback configured; signed inbound→AI→outbound path verified; **awaiting controlled real-phone inbound** for delivery confirmation |
+| Business WhatsApp number | `+234 704 723 0179` (display; Raslordeck) |
 
 ### Task 017 security foundation (unchanged)
 
@@ -705,9 +702,34 @@ Load: ~0.10 / 0.06 / 0.04
 - Meta webhook subscription (`messages`) after Verify and save
 - Approved templates for business-initiated sends outside the 24h window
 
+## Task 027 — WhatsApp activation (2026-09-26)
+
+| Item | State |
+|------|--------|
+| Credentials in `.env` | Verify token, App Secret, Access Token, Phone Number ID, WABA ID — **all present** |
+| Config cache | Rebuilt so PHP-FPM sees secrets (`640` / `600` model) |
+| Meta callback | Graph `webhook_configuration.application` = `adman.raslordeckltd.com/webhooks/whatsapp` (**Verify and save** evidence) |
+| WABA `subscribed_apps` | 1 app |
+| Graph phone lookup | HTTP 200 (token + phone number ID accepted) |
+| `ADMAN_WHATSAPP_ENABLED` | **true** |
+| Signature tests | Valid → 200 `EVENT_RECEIVED`; invalid/missing → 403 |
+| Signed inbound probe | Message persisted → `ProcessInboundAiMessage` DONE (~2s) → OpenAI → `SendOutboundWhatsAppJob` DONE |
+| Outbound to probe number | Message status `failed` (`WhatsApp: Message undeliverable`) — probe used a non-real recipient |
+| Real Meta inbound (`wamid.HBg…`) during monitor | **none** |
+| AI safety (tools) | Business Q ✓ · handoff → human + skip ✓ · payment claim `pending_verification`, invoice unpaid ✓ |
+| Resources | Available RAM ~380–441 Mi; swap ~151 Mi flat; Horizon 1 worker; failed_jobs=0 |
+
+### Controlled live-phone E2E (operator)
+
+1. From an authorized personal WhatsApp, message business number **+234 704 723 0179**: `Hello ADMAN`
+2. Confirm ADMAN conversation shows inbound + AI outbound **sent/delivered**
+3. Then run handoff / payment-claim scenarios on that conversation
+
+Until step 2 succeeds, do not treat customer WhatsApp delivery as fully proven.
+
 ## Next step
 
-Retry Meta **Verify and save** with Callback URL `https://adman.raslordeckltd.com/webhooks/whatsapp` and the existing production verify token. Then supply App Secret + Access Token + Phone Number ID before setting `ADMAN_WHATSAPP_ENABLED=true` and running Task 025 E2E.
+Operator sends a controlled inbound WhatsApp to `+234 704 723 0179`, then confirm AI reply delivery on-device. Keep Horizon at 1 worker.
 
 ---
 
