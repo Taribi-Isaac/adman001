@@ -31,8 +31,20 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Setup Application
-        run: composer setup
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Prepare application env
+        run: |
+          cp .env.example .env
+          php artisan key:generate --no-interaction
+          # Pest/phpunit use sqlite :memory: from phpunit.xml; no MySQL service required.
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
 
       - name: Run CI Checks
         run: composer ci:check
