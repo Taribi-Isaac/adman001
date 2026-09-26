@@ -789,7 +789,7 @@ Production tracks **`origin/main` only**. `develop` is never auto-deployed.
 ### CI — `.github/workflows/tests.yml`
 
 | Trigger | `push` to `main`, all `pull_request`s |
-| Steps | Checkout → PHP 8.3 + Node 22 → `composer setup` → `composer ci:check` |
+| Steps | Checkout → PHP **8.4** + Node 22 → `composer setup` → `composer ci:check` |
 | Failure | Workflow fails; deploy does **not** run |
 
 `composer ci:check` runs frontend check, PHPStan, Pint, and Pest.
