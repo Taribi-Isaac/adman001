@@ -6,6 +6,7 @@ use App\Enums\DiscountType;
 use App\Enums\InvoiceDueState;
 use App\Enums\InvoiceLifecycleStatus;
 use App\Enums\InvoicePaymentStatus;
+use App\Enums\PaymentStatus;
 use App\Support\DocumentSnapshots;
 use App\Support\Money;
 use Database\Factories\InvoiceFactory;
@@ -192,7 +193,7 @@ class Invoice extends Model
         $this->loadMissing('payments');
 
         foreach ($this->payments as $payment) {
-            if ($payment->status === \App\Enums\PaymentStatus::Confirmed) {
+            if ($payment->status === PaymentStatus::Confirmed) {
                 $paid = Money::add($paid, (string) $payment->amount);
             }
         }
@@ -273,10 +274,10 @@ class Invoice extends Model
     }
 
     /**
-     * @return HasMany<\App\Models\ReminderOccurrence, $this>
+     * @return HasMany<ReminderOccurrence, $this>
      */
     public function reminderOccurrences(): HasMany
     {
-        return $this->hasMany(\App\Models\ReminderOccurrence::class);
+        return $this->hasMany(ReminderOccurrence::class);
     }
 }

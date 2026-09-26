@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\ContactStatus;
 use App\Enums\ContactType;
+use App\Enums\ReminderChannelPreference;
 use App\Models\Contact;
 use Illuminate\Validation\ValidationException;
 
@@ -212,9 +213,9 @@ class ContactService
         }
 
         if (array_key_exists('reminder_channel', $data) && $data['reminder_channel'] !== null && $data['reminder_channel'] !== '') {
-            $payload['reminder_channel'] = $data['reminder_channel'] instanceof \App\Enums\ReminderChannelPreference
+            $payload['reminder_channel'] = $data['reminder_channel'] instanceof ReminderChannelPreference
                 ? $data['reminder_channel']
-                : \App\Enums\ReminderChannelPreference::from((string) $data['reminder_channel']);
+                : ReminderChannelPreference::from((string) $data['reminder_channel']);
         }
 
         return $payload;

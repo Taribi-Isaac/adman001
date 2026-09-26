@@ -18,6 +18,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\DocumentService;
 use App\Services\InvoiceService;
+use App\Services\ReminderService;
 use App\Support\DocumentSnapshots;
 use App\Support\EmailDeliveryPresenter;
 use App\Support\Money;
@@ -147,7 +148,7 @@ class InvoiceController extends Controller
             ->filter(fn ($claim) => $claim->status->isOpen())
             ->values();
 
-        $reminderRules = app(\App\Services\ReminderService::class)->ensureDefaultRules();
+        $reminderRules = app(ReminderService::class)->ensureDefaultRules();
 
         return Inertia::render('invoices/Show', [
             'invoice' => $this->detailPayload($invoice, $dueState, $display),

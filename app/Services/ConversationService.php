@@ -12,6 +12,7 @@ use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\User;
+use App\Support\WhatsAppPhone;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -35,7 +36,7 @@ class ConversationService
             $externalId = strtolower($externalId);
         }
         if ($channel === CommunicationChannel::WhatsApp) {
-            $normalized = \App\Support\WhatsAppPhone::normalize($externalId);
+            $normalized = WhatsAppPhone::normalize($externalId);
             if ($normalized === null) {
                 throw ValidationException::withMessages([
                     'external_id' => 'WhatsApp number must include a valid country code (digits only after normalization).',

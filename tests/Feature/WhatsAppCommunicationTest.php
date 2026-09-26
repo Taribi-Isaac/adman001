@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Contracts\WhatsAppDeliveryAdapter;
 use App\Enums\CommunicationChannel;
-use App\Enums\ContactStatus;
 use App\Enums\ConversationMode;
 use App\Enums\DiscountType;
 use App\Enums\MessageStatus;
@@ -17,6 +16,7 @@ use App\Models\Conversation;
 use App\Models\Invoice;
 use App\Models\Message;
 use App\Models\User;
+use App\Services\ConversationService;
 use App\Services\InvoiceService;
 use App\Services\PaymentService;
 use App\Services\QuoteService;
@@ -25,8 +25,11 @@ use App\Services\WhatsAppOutboundService;
 use App\Support\Permissions;
 use App\Support\WhatsAppDeliveryPayload;
 use App\Support\WhatsAppDeliveryResult;
+use App\Support\WhatsAppDocumentPayload;
 use App\Support\WhatsAppPhone;
+use App\Support\WhatsAppTextPayload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Spatie\Permission\Models\Role;
@@ -104,7 +107,7 @@ class WhatsAppCommunicationTest extends TestCase
         $this->assertSame('2348012345678', WhatsAppPhone::normalize('+234 801 234 5678'));
         $this->assertSame('2348012345678', WhatsAppPhone::normalize('002348012345678'));
 
-        $service = app(\App\Services\ConversationService::class);
+        $service = app(ConversationService::class);
         $contact = $this->customerReadyForWhatsApp();
 
         $first = $service->findOrCreateIdentity(
@@ -127,7 +130,7 @@ class WhatsAppCommunicationTest extends TestCase
 
     public function test_authorized_staff_can_queue_invoice_whatsapp(): void
     {
-        Http::fake(function (\Illuminate\Http\Client\Request $request) {
+        Http::fake(function (Request $request) {
             if (str_contains($request->url(), '/media')) {
                 return Http::response(['id' => 'media.TESTUPLOAD'], 200);
             }
@@ -224,7 +227,7 @@ class WhatsAppCommunicationTest extends TestCase
                 return WhatsAppDeliveryResult::failed('Provider rejected the message.', false);
             }
 
-            public function sendText(\App\Support\WhatsAppTextPayload $payload): WhatsAppDeliveryResult
+            public function sendText(WhatsAppTextPayload $payload): WhatsAppDeliveryResult
             {
                 return WhatsAppDeliveryResult::failed('Provider rejected the message.', false);
             }
@@ -234,7 +237,7 @@ class WhatsAppCommunicationTest extends TestCase
                 return WhatsAppDeliveryResult::failed('Provider rejected the message.', false);
             }
 
-            public function sendDocument(\App\Support\WhatsAppDocumentPayload $payload): WhatsAppDeliveryResult
+            public function sendDocument(WhatsAppDocumentPayload $payload): WhatsAppDeliveryResult
             {
                 return WhatsAppDeliveryResult::failed('Provider rejected the message.', false);
             }
@@ -252,7 +255,7 @@ class WhatsAppCommunicationTest extends TestCase
                 return WhatsAppDeliveryResult::ok('wamid.RETRY');
             }
 
-            public function sendText(\App\Support\WhatsAppTextPayload $payload): WhatsAppDeliveryResult
+            public function sendText(WhatsAppTextPayload $payload): WhatsAppDeliveryResult
             {
                 return WhatsAppDeliveryResult::ok('wamid.RETRY');
             }
@@ -262,7 +265,7 @@ class WhatsAppCommunicationTest extends TestCase
                 return WhatsAppDeliveryResult::ok('media.RETRY');
             }
 
-            public function sendDocument(\App\Support\WhatsAppDocumentPayload $payload): WhatsAppDeliveryResult
+            public function sendDocument(WhatsAppDocumentPayload $payload): WhatsAppDeliveryResult
             {
                 return WhatsAppDeliveryResult::ok('wamid.RETRY');
             }
@@ -343,7 +346,7 @@ class WhatsAppCommunicationTest extends TestCase
     public function test_inbound_links_known_contact_and_status_updates_are_forward_only(): void
     {
         $contact = $this->customerReadyForWhatsApp('2348066666666');
-        Http::fake(function (\Illuminate\Http\Client\Request $request) {
+        Http::fake(function (Request $request) {
             if (str_contains($request->url(), '/media')) {
                 return Http::response(['id' => 'media.OUT1'], 200);
             }
@@ -430,7 +433,7 @@ class WhatsAppCommunicationTest extends TestCase
     public function test_quote_and_payment_whatsapp_include_secure_link(): void
     {
         $ids = ['wamid.QUOTE1', 'wamid.PAY1'];
-        Http::fake(function (\Illuminate\Http\Client\Request $request) use (&$ids) {
+        Http::fake(function (Request $request) use (&$ids) {
             if (str_contains($request->url(), '/media')) {
                 return Http::response(['id' => 'media.'.(count($ids) ?: 'X')], 200);
             }
@@ -473,7 +476,7 @@ class WhatsAppCommunicationTest extends TestCase
 
     public function test_closed_conversation_stays_closed_and_new_inbound_opens_new_thread(): void
     {
-        $service = app(\App\Services\ConversationService::class);
+        $service = app(ConversationService::class);
         $identity = $service->findOrCreateIdentity(CommunicationChannel::WhatsApp, '2348033333333', 'Guest');
         $conversation = $service->openConversation($identity, ConversationMode::Human, 'Old');
         $service->close($conversation);

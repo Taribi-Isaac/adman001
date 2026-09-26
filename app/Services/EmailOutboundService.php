@@ -8,6 +8,7 @@ use App\Enums\ContactStatus;
 use App\Enums\ConversationMode;
 use App\Enums\DocumentType;
 use App\Enums\EmailTemplateKey;
+use App\Enums\InvoiceDueState;
 use App\Enums\InvoiceLifecycleStatus;
 use App\Enums\MessageActorType;
 use App\Enums\MessageDirection;
@@ -274,7 +275,6 @@ class EmailOutboundService
     }
 
     /**
-     * @param  Quote|Invoice|Payment  $documentable
      * @param  callable(): Document  $ensureDocument
      */
     private function queueDocumentEmail(
@@ -577,7 +577,7 @@ class EmailOutboundService
     private function invoiceReminderContext(array $base, Invoice $invoice, Business $business): array
     {
         $dueState = $invoice->dueState();
-        $overdue = $dueState === \App\Enums\InvoiceDueState::Overdue;
+        $overdue = $dueState === InvoiceDueState::Overdue;
 
         return [
             ...$base,

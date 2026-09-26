@@ -5,6 +5,8 @@ namespace App\WhatsApp\Adapters;
 use App\Contracts\WhatsAppDeliveryAdapter;
 use App\Support\WhatsAppDeliveryPayload;
 use App\Support\WhatsAppDeliveryResult;
+use App\Support\WhatsAppDocumentPayload;
+use App\Support\WhatsAppTextPayload;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -54,7 +56,7 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
         return $this->postMessage($url, $token, $requestBody);
     }
 
-    public function sendText(\App\Support\WhatsAppTextPayload $payload): WhatsAppDeliveryResult
+    public function sendText(WhatsAppTextPayload $payload): WhatsAppDeliveryResult
     {
         $credentials = $this->credentials();
         if ($credentials instanceof WhatsAppDeliveryResult) {
@@ -150,7 +152,7 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
         }
     }
 
-    public function sendDocument(\App\Support\WhatsAppDocumentPayload $payload): WhatsAppDeliveryResult
+    public function sendDocument(WhatsAppDocumentPayload $payload): WhatsAppDeliveryResult
     {
         $credentials = $this->credentials();
         if ($credentials instanceof WhatsAppDeliveryResult) {

@@ -65,9 +65,6 @@ class WhatsAppInboundService
         }
     }
 
-    /**
-     * @param  mixed  $statuses
-     */
     private function processStatuses(mixed $statuses): void
     {
         if (! is_array($statuses)) {
@@ -161,10 +158,6 @@ class WhatsAppInboundService
         });
     }
 
-    /**
-     * @param  mixed  $messages
-     * @param  mixed  $contacts
-     */
     private function processMessages(mixed $messages, mixed $contacts): void
     {
         if (! is_array($messages)) {

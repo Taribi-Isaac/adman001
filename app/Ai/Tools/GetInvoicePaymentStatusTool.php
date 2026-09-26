@@ -2,10 +2,8 @@
 
 namespace App\Ai\Tools;
 
-use App\Enums\PaymentStatus;
 use App\Models\Conversation;
 use App\Models\Message;
-use App\Models\Payment;
 use App\Services\Ai\AiAuthorization;
 
 final class GetInvoicePaymentStatusTool implements AiTool

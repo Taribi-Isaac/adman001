@@ -194,7 +194,6 @@ class DocumentService
     }
 
     /**
-     * @param  Quote|Invoice|Payment  $documentable
      * @return array{document: Document, plain_token: string|null}
      */
     private function storePdf(

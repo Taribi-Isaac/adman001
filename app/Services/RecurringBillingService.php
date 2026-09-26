@@ -14,6 +14,7 @@ use App\Models\RecurringBillingSchedule;
 use App\Models\User;
 use App\Support\DocumentSnapshots;
 use App\Support\RecurringBillingCalendar;
+use Carbon\CarbonInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -404,7 +405,7 @@ class RecurringBillingService
      *     generation?: RecurringBillingGeneration,
      *     schedule?: RecurringBillingSchedule,
      *     period?: array{period_key: string, period_start: string, period_end: string},
-     *     generation_date?: \Carbon\CarbonInterface
+     *     generation_date?: CarbonInterface
      * }
      */
     private function claimPeriod(

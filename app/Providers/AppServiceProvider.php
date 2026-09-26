@@ -2,17 +2,20 @@
 
 namespace App\Providers;
 
+use App\Ai\Providers\FakeAiProvider;
+use App\Ai\Providers\OpenAiCompatibleProvider;
 use App\Contracts\AiProvider;
 use App\Contracts\EmailDeliveryAdapter;
 use App\Contracts\WhatsAppDeliveryAdapter;
-use App\Ai\Providers\FakeAiProvider;
-use App\Ai\Providers\OpenAiCompatibleProvider;
+use App\Contracts\WhatsAppMediaClient;
 use App\Mail\Adapters\LaravelMailEmailDeliveryAdapter;
 use App\Models\Business;
 use App\Models\User;
 use App\Support\Permissions;
 use App\Support\ProductionSafety;
+use App\WhatsApp\Adapters\FakeWhatsAppMediaClient;
 use App\WhatsApp\Adapters\WhatsAppCloudApiAdapter;
+use App\WhatsApp\Adapters\WhatsAppCloudMediaClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -32,12 +35,12 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(EmailDeliveryAdapter::class, LaravelMailEmailDeliveryAdapter::class);
         $this->app->bind(WhatsAppDeliveryAdapter::class, WhatsAppCloudApiAdapter::class);
-        $this->app->bind(\App\Contracts\WhatsAppMediaClient::class, function () {
+        $this->app->bind(WhatsAppMediaClient::class, function () {
             if (app()->environment('testing')) {
-                return new \App\WhatsApp\Adapters\FakeWhatsAppMediaClient;
+                return new FakeWhatsAppMediaClient;
             }
 
-            return new \App\WhatsApp\Adapters\WhatsAppCloudMediaClient;
+            return new WhatsAppCloudMediaClient;
         });
         $this->app->bind(AiProvider::class, function () {
             $provider = strtolower((string) config('adman.ai.provider', 'openai'));

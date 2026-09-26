@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Contacts;
 
 use App\Enums\ContactStatus;
 use App\Enums\ContactType;
+use App\Enums\ReminderChannelPreference;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Contacts\PromoteContactRequest;
 use App\Http\Requests\Contacts\StoreContactRequest;
@@ -226,7 +227,7 @@ class ContactController extends Controller
             'last_name' => $contact->last_name,
             'whatsapp_id' => $contact->whatsapp_id,
             'whatsapp_opt_in' => (bool) $contact->whatsapp_opt_in,
-            'reminder_channel' => $contact->reminder_channel instanceof \App\Enums\ReminderChannelPreference
+            'reminder_channel' => $contact->reminder_channel instanceof ReminderChannelPreference
                 ? $contact->reminder_channel->value
                 : (string) ($contact->reminder_channel ?? 'email'),
             'address_line_1' => $contact->address_line_1,

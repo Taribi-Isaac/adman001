@@ -13,6 +13,7 @@ use App\Models\ReminderOccurrence;
 use App\Models\ReminderRule;
 use App\Models\User;
 use App\Support\Money;
+use App\Support\WhatsAppPhone;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
@@ -404,7 +405,7 @@ class ReminderService
             if (! $contact->whatsapp_opt_in) {
                 return 'Customer has not opted in to WhatsApp';
             }
-            if (\App\Support\WhatsAppPhone::fromContact($contact) === null) {
+            if (WhatsAppPhone::fromContact($contact) === null) {
                 return 'Customer has no valid WhatsApp number';
             }
 

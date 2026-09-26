@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Conversations;
 
 use App\Enums\CommunicationChannel;
 use App\Enums\ConversationMode;
+use App\Enums\MessageActorType;
+use App\Enums\MessageStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Conversations\ComposeMessageRequest;
 use App\Http\Requests\Conversations\LinkContactRequest;
@@ -360,19 +362,19 @@ class ConversationController extends Controller
             'status_label' => $message->status->label(),
             'actor_type' => $message->actor_type->value,
             'actor_type_label' => $message->actor_type->label(),
-            'actor_name' => $message->actor_type === \App\Enums\MessageActorType::Ai
+            'actor_name' => $message->actor_type === MessageActorType::Ai
                 ? 'AI assistant'
                 : $message->actorUser?->name,
             'occurred_at' => $message->occurred_at?->toIso8601String(),
             'sent_at' => $message->sent_at?->toIso8601String(),
             'failed_at' => $message->failed_at?->toIso8601String(),
             'failure_reason' => $message->failure_reason,
-            'is_external_delivery' => $message->status !== \App\Enums\MessageStatus::Recorded,
+            'is_external_delivery' => $message->status !== MessageStatus::Recorded,
             'can_retry' => (
-                ($message->channel === \App\Enums\CommunicationChannel::Email
-                    || $message->channel === \App\Enums\CommunicationChannel::WhatsApp)
-                && ($message->status === \App\Enums\MessageStatus::Failed
-                    || $message->status === \App\Enums\MessageStatus::Pending)
+                ($message->channel === CommunicationChannel::Email
+                    || $message->channel === CommunicationChannel::WhatsApp)
+                && ($message->status === MessageStatus::Failed
+                    || $message->status === MessageStatus::Pending)
             ),
         ];
     }

@@ -4,10 +4,12 @@ namespace App\Models;
 
 use App\Enums\ContactStatus;
 use App\Enums\ContactType;
+use App\Enums\ReminderChannelPreference;
 use Database\Factories\ContactFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -74,7 +76,7 @@ class Contact extends Model
             'type' => ContactType::class,
             'status' => ContactStatus::class,
             'whatsapp_opt_in' => 'boolean',
-            'reminder_channel' => \App\Enums\ReminderChannelPreference::class,
+            'reminder_channel' => ReminderChannelPreference::class,
             'archived_at' => 'datetime',
         ];
     }
@@ -90,33 +92,33 @@ class Contact extends Model
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\CommunicationIdentity, $this>
+     * @return HasMany<CommunicationIdentity, $this>
      */
-    public function communicationIdentities(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function communicationIdentities(): HasMany
     {
         return $this->hasMany(CommunicationIdentity::class);
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Conversation, $this>
+     * @return HasMany<Conversation, $this>
      */
-    public function conversations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function conversations(): HasMany
     {
         return $this->hasMany(Conversation::class);
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Quote, $this>
+     * @return HasMany<Quote, $this>
      */
-    public function quotes(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function quotes(): HasMany
     {
         return $this->hasMany(Quote::class);
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Invoice, $this>
+     * @return HasMany<Invoice, $this>
      */
-    public function invoices(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function invoices(): HasMany
     {
         return $this->hasMany(Invoice::class);
     }

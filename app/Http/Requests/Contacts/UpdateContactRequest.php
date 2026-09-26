@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Contacts;
 
 use App\Enums\ContactType;
+use App\Enums\ReminderChannelPreference;
 use App\Support\Permissions;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -29,7 +30,7 @@ class UpdateContactRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:50'],
             'whatsapp_id' => ['nullable', 'string', 'max:100'],
             'whatsapp_opt_in' => ['sometimes', 'boolean'],
-            'reminder_channel' => ['sometimes', Rule::in(\App\Enums\ReminderChannelPreference::values())],
+            'reminder_channel' => ['sometimes', Rule::in(ReminderChannelPreference::values())],
             'address_line_1' => ['nullable', 'string', 'max:255'],
             'address_line_2' => ['nullable', 'string', 'max:255'],
             'city' => ['nullable', 'string', 'max:120'],

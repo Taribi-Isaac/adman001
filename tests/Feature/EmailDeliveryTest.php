@@ -8,20 +8,18 @@ use App\Enums\ContactStatus;
 use App\Enums\DiscountType;
 use App\Enums\MessageStatus;
 use App\Enums\PaymentMethod;
-use App\Enums\PaymentStatus;
 use App\Enums\QuoteStatus;
 use App\Jobs\SendOutboundEmailJob;
 use App\Mail\DocumentOutboundMail;
-use App\Models\AuditEvent;
 use App\Models\Business;
 use App\Models\CommunicationIdentity;
 use App\Models\Contact;
 use App\Models\Document;
 use App\Models\Invoice;
 use App\Models\Message;
-use App\Models\Payment;
 use App\Models\Quote;
 use App\Models\User;
+use App\Services\ConversationService;
 use App\Services\DocumentService;
 use App\Services\EmailOutboundService;
 use App\Services\InvoiceService;
@@ -33,6 +31,7 @@ use App\Support\Permissions;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Role;
 use Tests\Concerns\CreatesFoundationUsers;
 use Tests\TestCase;
@@ -103,7 +102,7 @@ class EmailDeliveryTest extends TestCase
 
     public function test_email_identity_is_created_and_reused(): void
     {
-        $service = app(\App\Services\ConversationService::class);
+        $service = app(ConversationService::class);
         $contact = $this->customerWithEmail('Reuse.Me@Example.com');
 
         $first = $service->findOrCreateIdentity(
@@ -348,7 +347,7 @@ class EmailDeliveryTest extends TestCase
         $invoice->contact_id = $prospect->id;
         $invoice->save();
 
-        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->expectException(ValidationException::class);
         app(EmailOutboundService::class)->queueInvoiceEmail($invoice->fresh(['contact', 'documents']), $staff);
     }
 }

@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Contact;
+
 /**
  * WhatsApp Cloud API identifiers are digits-only phone numbers (country code, no +).
  *
@@ -35,7 +37,7 @@ final class WhatsAppPhone
         return $digits;
     }
 
-    public static function fromContact(\App\Models\Contact $contact): ?string
+    public static function fromContact(Contact $contact): ?string
     {
         $fromWhatsAppId = self::normalize($contact->whatsapp_id);
         if ($fromWhatsAppId !== null) {

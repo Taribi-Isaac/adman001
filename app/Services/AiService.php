@@ -12,6 +12,7 @@ use App\Models\AiMessageProcessing;
 use App\Models\Business;
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Services\Ai\AiBusinessContextAssembler;
 use App\Services\Ai\AiToolRegistry;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Throwable;
@@ -333,7 +334,7 @@ class AiService
 
     private function systemPrompt(Business $business, Conversation $conversation): string
     {
-        $context = app(\App\Services\Ai\AiBusinessContextAssembler::class)
+        $context = app(AiBusinessContextAssembler::class)
             ->assemble($business, $conversation);
 
         return <<<PROMPT

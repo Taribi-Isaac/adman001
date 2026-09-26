@@ -9,6 +9,8 @@ use App\Enums\InvoicePaymentStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\ReminderChannelPreference;
 use App\Enums\ReminderOccurrenceStatus;
+use App\Jobs\ProcessDueInvoiceReminders;
+use App\Mail\DocumentOutboundMail;
 use App\Models\Business;
 use App\Models\Contact;
 use App\Models\Invoice;
@@ -168,7 +170,7 @@ class InvoiceReminderTest extends TestCase
         $occurrence = $claimed->first();
         app(ReminderService::class)->processOccurrence($occurrence);
         $this->assertSame(ReminderOccurrenceStatus::Queued, $occurrence->fresh()->status);
-        Mail::assertSent(\App\Mail\DocumentOutboundMail::class);
+        Mail::assertSent(DocumentOutboundMail::class);
     }
 
     public function test_timing_offsets_and_idempotency(): void
@@ -287,6 +289,6 @@ class InvoiceReminderTest extends TestCase
         app(ReminderService::class)->ensureDefaultRules();
 
         $this->artisan('reminders:process-due')->assertSuccessful();
-        Queue::assertPushed(\App\Jobs\ProcessDueInvoiceReminders::class);
+        Queue::assertPushed(ProcessDueInvoiceReminders::class);
     }
 }

@@ -2,6 +2,4 @@
 
 namespace App\Http\Requests\Settings;
 
-class UpdateBusinessOfferingRequest extends StoreBusinessOfferingRequest
-{
-}
+class UpdateBusinessOfferingRequest extends StoreBusinessOfferingRequest {}

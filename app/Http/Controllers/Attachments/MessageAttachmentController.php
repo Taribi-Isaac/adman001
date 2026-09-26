@@ -10,10 +10,12 @@ use App\Services\AuditLogger;
 use App\Support\Permissions;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class MessageAttachmentController extends Controller
 {
-    public function download(MessageAttachment $attachment): \Symfony\Component\HttpFoundation\StreamedResponse|\Symfony\Component\HttpFoundation\BinaryFileResponse
+    public function download(MessageAttachment $attachment): StreamedResponse|BinaryFileResponse
     {
         $this->authorize(Permissions::ATTACHMENTS_VIEW);
 

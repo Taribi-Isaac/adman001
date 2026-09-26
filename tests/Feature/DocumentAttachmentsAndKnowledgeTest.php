@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Contracts\WhatsAppMediaClient;
+use App\Enums\CommunicationChannel;
 use App\Enums\ConversationMode;
 use App\Enums\DiscountType;
+use App\Enums\MessageStatus;
 use App\Mail\DocumentOutboundMail;
 use App\Models\Business;
 use App\Models\BusinessKnowledgeArticle;
@@ -12,11 +14,15 @@ use App\Models\BusinessOffering;
 use App\Models\Contact;
 use App\Models\Message;
 use App\Models\MessageAttachment;
+use App\Models\Payment;
+use App\Models\User;
 use App\Notifications\InboundAttachmentReceived;
 use App\Services\Ai\AiBusinessContextAssembler;
 use App\Services\ConversationService;
+use App\Services\DocumentService;
 use App\Services\EmailOutboundService;
 use App\Services\InvoiceService;
+use App\Services\QuoteService;
 use App\Services\WhatsAppInboundService;
 use App\Support\DocumentSnapshots;
 use App\Support\Permissions;
@@ -89,13 +95,13 @@ class DocumentAttachmentsAndKnowledgeTest extends TestCase
             'tax_enabled' => false,
         ], $this->sampleItems(), $staff);
         $invoice = app(InvoiceService::class)->issue($invoice);
-        $generated = app(\App\Services\DocumentService::class)->generateInvoicePdf($invoice, $staff, false);
+        $generated = app(DocumentService::class)->generateInvoicePdf($invoice, $staff, false);
         $document = $generated['document'];
         $this->assertNotNull($document);
         Storage::disk($document->disk)->delete($document->path);
 
         $message = app(EmailOutboundService::class)->queueInvoiceEmail($invoice->fresh(['contact', 'documents']), $staff);
-        $this->assertSame(\App\Enums\MessageStatus::Failed, $message->fresh()->status);
+        $this->assertSame(MessageStatus::Failed, $message->fresh()->status);
         $this->assertStringContainsString('missing', strtolower((string) $message->fresh()->failure_reason));
     }
 
@@ -154,13 +160,13 @@ class DocumentAttachmentsAndKnowledgeTest extends TestCase
         $this->assertStringContainsString('INVOICE', $html);
         $this->assertStringContainsString('Balance due', $html);
 
-        $quote = app(\App\Services\QuoteService::class)->create([
+        $quote = app(QuoteService::class)->create([
             'contact_id' => $customer->id,
             'discount_type' => DiscountType::None->value,
             'discount_value' => '0',
             'tax_enabled' => false,
         ], $this->sampleItems(), $staff);
-        $quote = app(\App\Services\QuoteService::class)->issue($quote);
+        $quote = app(QuoteService::class)->issue($quote);
         $quote->business_snapshot = DocumentSnapshots::business($business->fresh());
         $quote->save();
 
@@ -197,7 +203,7 @@ class DocumentAttachmentsAndKnowledgeTest extends TestCase
         ]);
 
         $identity = app(ConversationService::class)->findOrCreateIdentity(
-            \App\Enums\CommunicationChannel::WhatsApp,
+            CommunicationChannel::WhatsApp,
             '2348099990000',
             'Unknown',
         );
@@ -216,8 +222,8 @@ class DocumentAttachmentsAndKnowledgeTest extends TestCase
     public function test_knowledge_permissions_are_enforced(): void
     {
         $this->seedRolesAndPermissions();
-        /** @var \App\Models\User $user */
-        $user = \App\Models\User::factory()->create();
+        /** @var User $user */
+        $user = User::factory()->create();
         $role = Role::findOrCreate('Limited', 'web');
         $role->syncPermissions([Permissions::SETTINGS_ACCESS]);
         $user->assignRole($role);
@@ -287,7 +293,7 @@ class DocumentAttachmentsAndKnowledgeTest extends TestCase
 
         Notification::assertSentTo($staff, InboundAttachmentReceived::class);
         $this->assertDatabaseHas('audit_events', ['event' => 'attachment.inbound_stored']);
-        $this->assertSame(0, \App\Models\Payment::query()->count());
+        $this->assertSame(0, Payment::query()->count());
     }
 
     public function test_oversized_inbound_media_is_rejected(): void
@@ -354,8 +360,8 @@ class DocumentAttachmentsAndKnowledgeTest extends TestCase
 
         $attachment = MessageAttachment::query()->firstOrFail();
         $this->seedRolesAndPermissions();
-        /** @var \App\Models\User $user */
-        $user = \App\Models\User::factory()->create();
+        /** @var User $user */
+        $user = User::factory()->create();
         $role = Role::findOrCreate('Limited', 'web');
         $role->syncPermissions([Permissions::CONVERSATIONS_VIEW, Permissions::MESSAGES_VIEW]);
         $user->assignRole($role);

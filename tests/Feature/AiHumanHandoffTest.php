@@ -6,7 +6,6 @@ use App\Ai\Providers\FakeAiProvider;
 use App\Contracts\WhatsAppDeliveryAdapter;
 use App\Enums\AiProcessingStatus;
 use App\Enums\CommunicationChannel;
-use App\Enums\ContactStatus;
 use App\Enums\ConversationMode;
 use App\Enums\DiscountType;
 use App\Enums\MessageActorType;
@@ -31,6 +30,7 @@ use App\Support\AiProviderResponse;
 use App\Support\Permissions;
 use App\Support\WhatsAppDeliveryPayload;
 use App\Support\WhatsAppDeliveryResult;
+use App\Support\WhatsAppDocumentPayload;
 use App\Support\WhatsAppTextPayload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -71,7 +71,7 @@ class AiHumanHandoffTest extends TestCase
                 return WhatsAppDeliveryResult::ok('media.AI');
             }
 
-            public function sendDocument(\App\Support\WhatsAppDocumentPayload $payload): WhatsAppDeliveryResult
+            public function sendDocument(WhatsAppDocumentPayload $payload): WhatsAppDeliveryResult
             {
                 return WhatsAppDeliveryResult::ok('wamid.DOC.'.md5($payload->mediaId));
             }

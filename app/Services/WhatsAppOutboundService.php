@@ -25,6 +25,7 @@ use App\Models\Payment;
 use App\Models\Quote;
 use App\Models\User;
 use App\Support\WhatsAppDeliveryPayload;
+use App\Support\WhatsAppDeliveryResult;
 use App\Support\WhatsAppDocumentPayload;
 use App\Support\WhatsAppPhone;
 use App\Support\WhatsAppTextPayload;
@@ -385,7 +386,6 @@ class WhatsAppOutboundService
     }
 
     /**
-     * @param  Quote|Invoice|Payment  $documentable
      * @param  callable(): Document  $ensureDocument
      */
     private function queueDocumentWhatsApp(
@@ -523,7 +523,7 @@ class WhatsAppOutboundService
     /**
      * @param  array<string, mixed>  $meta
      */
-    private function deliverDocumentPdf(Message $message, array $meta): \App\Support\WhatsAppDeliveryResult
+    private function deliverDocumentPdf(Message $message, array $meta): WhatsAppDeliveryResult
     {
         $to = WhatsAppPhone::normalize((string) ($meta['to'] ?? $message->conversation?->identity?->external_id ?? ''));
         if ($to === null) {
