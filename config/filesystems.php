@@ -35,6 +35,12 @@ return [
             'root' => storage_path('app/private'),
             // Private business PDFs must not be served via temporary public disk URLs.
             'serve' => false,
+            // PHP-FPM (www-data) and Horizon/scheduler (adman) share group www-data and
+            // must both write/read directories the other created; Flysystem's default 0700 breaks that.
+            'permissions' => [
+                'file' => ['public' => 0664, 'private' => 0660],
+                'dir' => ['public' => 0775, 'private' => 0770],
+            ],
             'throw' => false,
             'report' => false,
         ],
