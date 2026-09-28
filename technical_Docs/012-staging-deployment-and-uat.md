@@ -2,6 +2,8 @@
 
 ## Status of this task (honest)
 
+> **Current state (Task 030, 2026-09-28):** No separate staging environment exists; ADMAN went straight to production (`https://adman.raslordeckltd.com`). The "blocked — no staging" UAT table below is a historical Task 014 record. The production UAT/closure review is recorded in `016-production-deployment.md` → Task 030.
+
 **Task 014 (2026-09-23):** Local pre-deployment verification was completed. **No remote staging environment was deployed** — required external resources are still unavailable in this workspace.
 
 | Dependency | Status |

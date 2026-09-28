@@ -121,7 +121,7 @@ Previously used create settings (kept for reference):
 | Authentication | **SSH key** only — add your public key (do not enable password login) |
 | Hostname | e.g. `adman-prod` |
 | Tags (optional) | `adman`, `production` |
-| Backups | Optional (deferred automated app backups remain out of scope; DO backups are separate) |
+| Backups | Optional at create time — **see Task 030: no automated backups currently exist** |
 | Monitoring | Enable DigitalOcean basic monitoring if offered at create time |
 | IPv6 | Optional; if unused, do not publish AAAA later |
 
@@ -820,6 +820,7 @@ Application secrets (OpenAI, Resend, WhatsApp, `APP_KEY`, DB) stay in the server
 - `.env` present, mode `600`, **gitignored**
 - Node, Composer, PHP 8.4 CLI available to `adman`
 - Horizon unit `adman-horizon` and timer `adman-scheduler.timer`
+- systemd drop-in `UMask=0002` for `php8.4-fpm`, `adman-horizon`, `adman-scheduler` (`/etc/systemd/system/<unit>.service.d/umask.conf`) — required with the private disk `0770` directory permissions (Task 030)
 
 ### Deploy script commands (`scripts/deploy-production.sh`)
 
@@ -912,6 +913,51 @@ If Actions is unavailable, the same script is the supported path. Preserve `.env
 ### Security posture during CI/CD
 
 CI/CD must not weaken: key-only SSH, root SSH disabled, UFW, MySQL/Redis localhost-only, `.env` `600`, config cache least-privilege, `APP_DEBUG=false`, Horizon auth, `.git` / private storage not web-accessible.
+
+---
+
+## Task 030 — Production readiness & development-phase closure review (2026-09-28)
+
+### Defect found and fixed: private-storage permissions (A — production blocker)
+
+Flysystem's `local` disk creates directories `0700` owned by whichever process writes first. PHP-FPM (`www-data`) and Horizon/scheduler (`adman`, group `www-data`) therefore locked each other out:
+
+- 2026-09-26: staff "email invoice" failed (`Unable to create a directory …/Invoice/2`) because the parent dir was worker-owned `0700`
+- 2026-09-28: the worker created `…/Invoice/2` as `0700 adman` → PHP-FPM could not read INV-00002's PDF (staff download / secure link)
+- `inbound/` media dirs created by FPM as `0700 www-data` → unreadable by workers
+
+Fix:
+
+| Layer | Change |
+|-------|--------|
+| App | `config/filesystems.php` local disk `permissions`: dirs `0770`, files private `0660` |
+| Server | `UMask=0002` drop-ins for `php8.4-fpm`, `adman-horizon`, `adman-scheduler` (so `0770` is not masked to `0750`) |
+| Existing dirs | Normalized by the deploy script (`chown -R adman:www-data`, dirs `775`) |
+| Test | `tests/Feature/PrivateStoragePermissionsTest.php` |
+
+If a new server is built, recreate the three drop-ins **before** go-live.
+
+### Backups (B — operational risk, owner action)
+
+Confirmed on the Droplet: **no** `mysqldump` cron/timer, **no** off-server copy, no backup files. Data today: MySQL ~200 MB on disk, `storage/app/private` ~2 MB. Smallest adequate options (owner choice, not implemented here):
+
+1. Enable **DigitalOcean Droplet Backups** (console toggle; whole-disk, off-Droplet), and/or
+2. A nightly `mysqldump` + `storage/app/private` tarball copied off-server (see `011-production-readiness.md` → Backup & recovery)
+
+Before any deploy that includes a risky migration, take a manual dump first (the deploy script does not).
+
+### Review summary
+
+| Area | Result |
+|------|--------|
+| Production commit (before fix) | `33d8318` — matches `origin/main` |
+| Full suite (local) | 208 tests: 206 passed, 2 skipped, 0 failed |
+| Security | SSH key-only, root login off, UFW 22/80/443, MySQL/Redis `127.0.0.1`, `.env` 600, config cache 640, `APP_DEBUG=false`, `/horizon` 403, `/.git` + private storage 404, HTTP→HTTPS 301, Fail2ban active (52 bans), Certbot dry-run OK (cert valid to 2026-12-23) |
+| Resources (1 GB) | ~485 Mi available, swap ~300 Mi but `si/so` ≈ 0 (no thrashing), load ~0.1, disk 22%, Horizon 0 restarts, 0 OOM, Redis 1.9 MB — **keep current Droplet** |
+| Data integrity | invoice balance mismatches 0; claims all `pending_verification`; duplicate AI processing rows 0; duplicate provider ids 0; failed_jobs 0 |
+| Integrations | Resend (2 emails `sent`, provider ids), OpenAI (24 completed processings), WhatsApp (26 real inbound, outbound `delivered`/`read`) |
+
+Minor/deferred items (not closure blockers): no HSTS header; `robots.txt` allows indexing of `/login`; PHPStan + Vue `types:check`/oxfmt not in CI (pre-existing findings); `origin/develop` behind `main`; historical sections of this doc still describe earlier states (PHP 8.3, IP URL) by design.
 
 ---
 

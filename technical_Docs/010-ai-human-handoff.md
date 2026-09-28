@@ -232,7 +232,7 @@ ADMAN_AI_TIMEOUT=45
 | Business AI flags | `ai_enabled` + `ai_customer_responses_enabled` **true** |
 | Live provider test | Succeeded (~1.3–3.5 s) |
 | Controlled verification | Business context, authorization denial, payment **claim** (not confirmation), human handoff, processing idempotency |
-| WhatsApp | `ADMAN_WHATSAPP_ENABLED=false` — Meta credentials absent; webhook endpoint rejects invalid traffic (Task 025 blocked on external Meta setup) |
+| WhatsApp | At Task 024B time disabled; **enabled since Task 027** and verified with real devices in Task 028 (see `016-production-deployment.md`) |
 
 ### Controlled verification notes (Task 024B)
 

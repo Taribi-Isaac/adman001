@@ -10,7 +10,7 @@ This document describes the foundation established in Task 001.
 
 | Layer | Choice |
 | --- | --- |
-| Backend | Laravel 13 (PHP 8.3+) |
+| Backend | Laravel 13 (PHP 8.4.1+ — required by `composer.lock`; production runs 8.4) |
 | Frontend | Inertia.js 3 + Vue 3 + TypeScript |
 | CSS | Tailwind CSS 4 with semantic design tokens |
 | Auth | Laravel Fortify (session auth, no public registration) |
@@ -135,7 +135,7 @@ Scheduler currently runs Horizon snapshots and business jobs registered in `rout
 
 ## Development setup
 
-1. PHP 8.3+, Composer, Node 20+, MySQL, Redis.
+1. PHP 8.4.1+, Composer, Node 22, MySQL, Redis.
 2. Copy `.env.example` → `.env` and set MySQL/Redis values.
 3. `composer install`
 4. `php artisan key:generate`

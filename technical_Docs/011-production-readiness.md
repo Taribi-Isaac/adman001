@@ -150,6 +150,8 @@ MVP: local private disk is acceptable if the whole server (or `storage/app/priva
 
 ## Backup & recovery
 
+> **Current production status (Task 030, 2026-09-28):** No automated backup is configured on the Droplet (no `mysqldump` cron/timer, no off-server copy). DigitalOcean Droplet Backups status must be confirmed in the DO console by the owner. Until one of the options below exists, a Droplet loss or bad migration means data loss. See `016-production-deployment.md` → Task 030.
+
 ### MySQL
 
 - Daily automated dump (or provider snapshot) minimum
@@ -199,7 +201,7 @@ mysqldump -u… -p… adman | gzip > adman-$(date +%F).sql.gz
 
 - [ ] VPS/OS hardened  
 - [ ] Firewall (80/443/SSH only as needed)  
-- [ ] PHP 8.3+ with extensions: `mbstring`, `openssl`, `pdo_mysql`, `redis`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `gd` or `imagick` as needed for PDF  
+- [ ] PHP 8.4.1+ (lockfile floor) with extensions: `mbstring`, `openssl`, `pdo_mysql`, `redis`, `tokenizer`, `xml`, `ctype`, `json`, `bcmath`, `fileinfo`, `gd` or `imagick` as needed for PDF  
 - [ ] Composer 2  
 - [ ] Node 20+ for asset build  
 - [ ] Nginx  
@@ -208,7 +210,7 @@ mysqldump -u… -p… adman | gzip > adman-$(date +%F).sql.gz
 
 ### Email
 
-- [ ] Provider account (SES/Postmark/SMTP)  
+- [ ] Provider account (production uses **Resend**)  
 - [ ] From domain SPF/DKIM/DMARC as required by provider  
 - [ ] `MAIL_*` + Business outbound email enabled  
 
