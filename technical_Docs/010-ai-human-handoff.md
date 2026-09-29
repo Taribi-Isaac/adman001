@@ -67,8 +67,8 @@ When customer responses are enabled, **new** inbound WhatsApp conversations open
 | Human | No |
 | Closed | No |
 
-Staff **Take over** → Human (existing). The assigned staff member can then reply on WhatsApp from the thread (Task 032); staff replies never trigger AI or change mode.  
-Staff **Return to AI** → AI mode; does not generate a response by itself.  
+Staff **Take over** → Human (existing). The assigned staff member can then reply on WhatsApp from the thread (Task 032); staff replies never trigger AI or change mode. A conversation already owned by another staff member cannot be taken over (Task 033).  
+Staff **Return to AI** → AI mode, assignment cleared; does not generate a response by itself, and customer messages received while Human are not answered retroactively — the AI replies to the next inbound message.  
 AI **request_human_handoff** / explicit human request → Human mode via `ConversationService::escalateToHuman` (unassigned).
 
 AI cannot change conversation mode except through the handoff tool.
@@ -82,7 +82,12 @@ When `escalateToHuman` actually moves a conversation from AI to Human/unassigned
 - Return to AI followed by a new escalation notifies again.
 - Take over / return / close do not notify.
 
-Observed behaviour kept for the next conversation-lifecycle review: after **Return to AI**, the next customer message is answered with the full history in context, so an earlier "speak to support" request can make the AI hand off again (seen on production conversation 10, 2026-09-28).
+Re-escalation after **Return to AI** (reviewed in Task 033): the AI reads the last 12 messages, including any earlier handoff request; the keyword shortcut only checks the current message.
+
+- Production conversation 10 (2026-09-28): customer asked for support, got no staff reply (four unanswered "Hello?" messages), was returned to AI, sent "Hello" → AI handed off again. The request was still unresolved, so this is not a defect.
+- Task 033 UAT on conversation 5 (2026-09-29): handoff → take over → staff reply → Return to AI → "What services do you offer?" → normal AI answer, no re-escalation.
+
+Classified as correct behaviour. Residual: the decision is model-driven, so an unrelated first message after Return to AI could still be read alongside an old request. If that is observed with a request staff already answered, the smallest correction is to mark the Return-to-AI point in the AI history (not implemented).
 
 ---
 

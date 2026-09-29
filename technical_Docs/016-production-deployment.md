@@ -991,6 +991,24 @@ Controlled WhatsApp send: **not performed**. At verification time no WhatsApp co
 
 Not implemented (intentional): broadcast WhatsApp and email messaging, template messages.
 
+## Task 033 — Communication lifecycle UAT (2026-09-29)
+
+Defect fixed: `ConversationService::takeOver` reassigned a Human conversation already owned by another staff member on a direct or stale POST (UI never offered it), bypassing the Task 032 reply-ownership rule. Now an atomic conditional claim; refusal shown on the thread. Regression test added. Deployed `3b55eb4` via main → tests (run 36608244794) → deploy-production (run 36608401356). Local suite: 257 tests, 255 passed, 2 skipped; frontend build ok.
+
+Controlled live UAT on the owner test conversation #5 only (times WAT):
+
+| Step | Result |
+|------|--------|
+| Inbound "Hello, I need help" (18:59) | Stored, AI mode kept, AI reply sent → read |
+| "I'd like to speak with the support team" (19:02) | AI handoff; Human + unassigned; reason recorded; 1 `ConversationNeedsHumanAttention` per eligible user (2); both emails delivered (Resend) |
+| Dashboard card / Needs Attention filter / badge / reason / Take Over button | Confirmed in UI by owner |
+| Take Over (Super Administrator) | Human, assigned; attention cleared; `conversation.taken_over` audited; no customer message. Second staff member refused for take over and reply (read-only service check) |
+| Staff WhatsApp reply (19:12) | Staff message, provider id recorded, sent → read, received on phone as typed (URL + punctuation); `whatsapp.staff_reply_queued` + `whatsapp.sent`; no AI processing, no notification, no duplicate, still Human |
+| Customer messages while Human | Stored, no AI processing |
+| Return to AI → "What services do you offer?" | AI mode, unassigned; one AI answer (formatter applied at delivery), no re-escalation, no notification |
+
+Observability: Horizon running, scheduler timer firing, failed_jobs 0, no new `laravel.log` lines during the UAT, queue empty, no outbound WhatsApp left pending/failed, `adman:production-check` and `--strict` exit 0, `adman:health` ok, `/up` and `/login` 200, unsigned webhook POST 403. No test data removed (the UAT messages are real history on the owner test conversation).
+
 ---
 
 ## Approval reminders (from Task 016)
