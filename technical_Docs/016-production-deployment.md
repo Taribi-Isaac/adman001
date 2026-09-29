@@ -979,6 +979,18 @@ Production verification: `/up` 200, `/login` 200, unsigned webhook POST 403, `ad
 
 Out of scope (unchanged): staff free-text WhatsApp replies, invitation onboarding, Return-to-AI behaviour (re-escalation noted in 010).
 
+## Task 032 — Staff WhatsApp replies (2026-09-29)
+
+Staff can send free-text WhatsApp replies from the conversation thread (details in docs 003, 008, 010). New authenticated route `POST /conversations/{conversation}/whatsapp-reply` (`messages.send`, CSRF, inside `auth` + `verified`); delivery reuses `WhatsAppOutboundService` → `SendOutboundWhatsAppJob` → Cloud API adapter. A reply is accepted only when the conversation is open, Human, assigned to the current user, and inside the 24-hour customer service window (latest stored inbound message for the identity). Staff text is sent as written; the AI formatter applies only to AI replies. No new queue, client, secret or public endpoint.
+
+Deployed `5f92936` via main → tests (run 36602897025) → deploy-production (run 36603069496). Local suite: 256 tests, 254 passed, 2 skipped (11 new tests); frontend build ok.
+
+Production verification: `/up` 200, `/login` 200, unsigned webhook POST 403, guest POST to the reply route 419 (CSRF), route registered, `adman:production-check` and `--strict` exit 0, `adman:health` database/redis/queue ok, Horizon running, scheduler timer active, failed_jobs 0, no new errors in `laravel.log`, Resend / AI / WhatsApp config present.
+
+Controlled WhatsApp send: **not performed**. At verification time no WhatsApp conversation had an open 24-hour window (owner test conversation #5 window ended 2026-09-28 08:18 UTC) and all were in AI mode. A read-only production check confirmed the server-side gate refuses the reply with the expected reason. No conversation state was changed and no WhatsApp message was sent. To verify live: message the business number from the owner test phone, take over that conversation in ADMAN, send a short reply from the **WhatsApp reply** tab, and confirm the status moves to sent/delivered.
+
+Not implemented (intentional): broadcast WhatsApp and email messaging, template messages.
+
 ---
 
 ## Approval reminders (from Task 016)
