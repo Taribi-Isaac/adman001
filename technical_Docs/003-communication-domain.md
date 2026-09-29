@@ -82,7 +82,7 @@ Table: `messages`
 | `channel` | Channel at time of message |
 | `body` | Message content |
 | `status` | See status semantics below |
-| `actor_type` | `external` \| `staff` \| `system` |
+| `actor_type` | `external` \| `staff` \| `system` \| `ai` |
 | `actor_user_id` | Staff user when applicable |
 | `external_message_id` | Future provider reference |
 | `occurred_at` | Sent/received time |
@@ -95,20 +95,21 @@ Messages and conversations are **not hard-deleted** by this domain. Contact arch
 
 | Status | Meaning |
 | --- | --- |
-| `recorded` | Stored in ADMAN history only — **not** externally delivered |
-| `pending` | Reserved for future provider handoff |
-| `sent` | Reserved for provider-confirmed send |
-| `delivered` | Reserved for provider-confirmed delivery |
-| `failed` | Reserved for provider-confirmed failure |
+| `recorded` | Stored in ADMAN history only — **not** externally delivered (internal notes, seed records) |
+| `pending` | Queued for provider delivery (UI: Queued) |
+| `processing` | Delivery job is currently sending |
+| `sent` | Provider accepted the message (provider message id stored) |
+| `delivered` / `read` | Provider status webhooks (forward-only) |
+| `failed` | Provider rejected or delivery failed; `failure_reason` shown to staff |
 
-Internal compose and seed inbound records created in this task always use `recorded`. The UI labels them as **Internal record**. Do not present fake WhatsApp/email delivery.
+Internal notes always use `recorded` and are labelled **Internal record**. Do not present fake WhatsApp/email delivery.
 
 ## AI / Human / Closed modes
 
 | Mode | Meaning |
 | --- | --- |
 | **AI** | Eligible for AI handling when business AI customer responses are enabled (Task 010). |
-| **Human** | Staff controls the conversation. Future AI must not reply. |
+| **Human** | Staff controls the conversation. AI does not reply. |
 | **Closed** | Closed; no automated processing. History preserved. |
 
 ### Human attention vs human takeover (no extra state)
@@ -126,6 +127,22 @@ Internal compose and seed inbound records created in this task always use `recor
 - Sets mode to Human, assigns current staff user, audits `conversation.taken_over`.
 - Deliberate; composing a message does **not** auto-takeover beyond existing mode rules.
 - Returning to AI sets mode to AI, clears assignment, audits `conversation.returned_to_ai`, and does **not** generate an AI response.
+
+### Staff WhatsApp reply (Task 032)
+
+The thread composer has two tabs: **WhatsApp reply** (sent to the customer) and **Internal note** (`recorded`, staff only).
+
+A WhatsApp reply is allowed only when all of these hold (checked server-side by `WhatsAppOutboundService::staffReplyBlocker`; the UI shows the same reason):
+
+1. WhatsApp conversation, user has `messages.send`, outbound WhatsApp enabled
+2. Conversation open and in **Human** mode
+3. Assigned to the **current** user (take over first; another staff member's conversation cannot be replied to — prevents two people answering at once)
+4. Valid, active WhatsApp identity
+5. Meta 24-hour customer service window open (see `008-whatsapp-communication.md`)
+
+`POST /conversations/{id}/whatsapp-reply` → `WhatsAppOutboundService::queueStaffSessionReply` → outbound message (`actor_type = staff`, `actor_user_id`, `status = pending`, `meta.delivery_kind = session_text`) → existing `SendOutboundWhatsAppJob` → Cloud API text message. Staff text is sent as written (no AI formatter). Status then follows `pending → processing → sent → delivered/read` or `failed`; the thread refreshes while a message is queued. Audit: `whatsapp.staff_reply_queued` (actor = staff) plus the existing `whatsapp.sent` / `whatsapp.failed` (provider message id).
+
+Replying does **not** change mode or assignment, does not create AI processing, and does not notify; the conversation stays Human until someone explicitly returns it to AI.
 
 ### Close / reopen
 
@@ -149,7 +166,8 @@ Internal compose and seed inbound records created in this task always use `recor
 | `conversations.close` | Close / reopen |
 | `conversations.link_contact` | Link / unlink identity ↔ Contact |
 | `messages.view` | View message history (required on show) |
-| `messages.compose` | Compose internal outbound `recorded` messages |
+| `messages.compose` | Internal notes (`recorded` messages) |
+| `messages.send` | Staff WhatsApp replies (plus document sends) |
 
 All checks are enforced server-side (middleware + `authorize` / FormRequest). Staff role receives these permissions by default.
 
@@ -199,7 +217,7 @@ This domain does **not** include:
 - List supports search (name/identifier/contact), mode, and channel filters.
 - Detail layout: message thread + context panel (identity, contact / unknown, controls).
 - Mode is shown with text label (not color alone).
-- Composer clearly states internal recording only.
+- Composer tabs distinguish **WhatsApp reply** (sent to the customer) from **Internal note** (staff only); an unavailable reply shows the blocking reason.
 
 ## Key modules
 

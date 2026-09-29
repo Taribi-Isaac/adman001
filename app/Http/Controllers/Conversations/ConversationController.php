@@ -9,13 +9,16 @@ use App\Enums\MessageStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Conversations\ComposeMessageRequest;
 use App\Http\Requests\Conversations\LinkContactRequest;
+use App\Http\Requests\Conversations\StaffWhatsAppReplyRequest;
 use App\Http\Requests\Conversations\StoreConversationRequest;
 use App\Models\AuditEvent;
 use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\MessageAttachment;
+use App\Models\User;
 use App\Services\ConversationService;
+use App\Services\WhatsAppOutboundService;
 use App\Support\Permissions;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -136,7 +139,7 @@ class ConversationController extends Controller
             ->with('success', 'Conversation created.');
     }
 
-    public function show(Conversation $conversation): Response
+    public function show(Conversation $conversation, WhatsAppOutboundService $whatsapp): Response
     {
         $this->authorize(Permissions::CONVERSATIONS_VIEW);
         $this->authorize(Permissions::MESSAGES_VIEW);
@@ -182,6 +185,9 @@ class ConversationController extends Controller
             'conversation' => $this->detailPayload($conversation),
             'messages' => $messages,
             'attachments' => $attachments,
+            'whatsappReply' => $conversation->channel === CommunicationChannel::WhatsApp && $user !== null
+                ? $this->whatsappReplyState($conversation, $user, $whatsapp)
+                : null,
             'permissions' => [
                 'takeover' => $user?->can(Permissions::CONVERSATIONS_TAKEOVER) ?? false,
                 'take_over_available' => $this->takeOverAvailable($conversation),
@@ -291,6 +297,22 @@ class ConversationController extends Controller
         return back()->with('success', 'Internal outbound message recorded. Not sent externally.');
     }
 
+    public function replyWhatsApp(
+        StaffWhatsAppReplyRequest $request,
+        Conversation $conversation,
+        WhatsAppOutboundService $whatsapp,
+    ): RedirectResponse {
+        $this->authorize(Permissions::MESSAGES_SEND);
+
+        $whatsapp->queueStaffSessionReply(
+            $conversation,
+            $request->user(),
+            $request->validated('body'),
+        );
+
+        return back()->with('success', 'WhatsApp reply queued. Its delivery status is shown in the message history.');
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -321,6 +343,20 @@ class ConversationController extends Controller
             ] : null,
             'assigned_user' => $conversation->assignedUser?->only(['id', 'name']),
             'needs_attention' => $conversation->needsHumanAttention(),
+        ];
+    }
+
+    /**
+     * @return array{available: bool, reason: string|null, window_expires_at: string|null}
+     */
+    private function whatsappReplyState(Conversation $conversation, User $user, WhatsAppOutboundService $whatsapp): array
+    {
+        $blocker = $whatsapp->staffReplyBlocker($conversation, $user);
+
+        return [
+            'available' => $blocker === null,
+            'reason' => $blocker,
+            'window_expires_at' => $whatsapp->customerServiceWindowExpiresAt($conversation)?->toIso8601String(),
         ];
     }
 

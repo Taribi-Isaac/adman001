@@ -331,7 +331,7 @@ Deferred dedicated pen-test / WAF / 2FA policy review.
 - No public deep health (DB/Redis) endpoint — intentional  
 - S3/object storage deferred  
 - CI/CD: see Task 029 in `016-production-deployment.md` (GitHub Actions tests → SSH deploy)  
-- Staff WhatsApp free-form composer deferred  
+- Staff WhatsApp free-text replies exist (Task 032, 24-hour window enforced); template re-engagement and broadcast messaging deferred  
 - Multi-server active-active needs shared storage + Redis + careful Horizon  
 
 ---

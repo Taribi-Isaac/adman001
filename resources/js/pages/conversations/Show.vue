@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
@@ -98,6 +98,11 @@ const props = defineProps<{
     conversation: ConversationDetail;
     messages: MessageRow[];
     attachments: AttachmentRow[];
+    whatsappReply: {
+        available: boolean;
+        reason: string | null;
+        window_expires_at: string | null;
+    } | null;
     permissions: {
         takeover: boolean;
         take_over_available: boolean;
@@ -129,6 +134,44 @@ const selectedContactId = ref(
 const composeForm = useForm({
     body: '',
 });
+
+const replyForm = useForm({
+    body: '',
+});
+
+const composerTab = ref<'whatsapp' | 'note'>(props.whatsappReply ? 'whatsapp' : 'note');
+
+const hasInFlightOutbound = computed(() =>
+    props.messages.some(
+        (message) =>
+            message.direction === 'outbound' &&
+            (message.status === 'pending' || message.status === 'processing'),
+    ),
+);
+
+let statusPoll: ReturnType<typeof setInterval> | null = null;
+
+const stopStatusPoll = () => {
+    if (statusPoll !== null) {
+        clearInterval(statusPoll);
+        statusPoll = null;
+    }
+};
+
+watch(
+    hasInFlightOutbound,
+    (inFlight) => {
+        stopStatusPoll();
+        if (inFlight) {
+            statusPoll = setInterval(() => {
+                router.reload({ only: ['messages', 'whatsappReply'] });
+            }, 4000);
+        }
+    },
+    { immediate: true },
+);
+
+onBeforeUnmount(stopStatusPoll);
 
 const modeClass = computed(() => {
     switch (props.conversation.mode) {
@@ -194,6 +237,16 @@ const unlinkContact = () => {
         {},
         { preserveScroll: true },
     );
+};
+
+const submitReply = () => {
+    if (replyForm.processing || replyForm.body.trim() === '') {
+        return;
+    }
+    replyForm.post(`/conversations/${props.conversation.id}/whatsapp-reply`, {
+        preserveScroll: true,
+        onSuccess: () => replyForm.reset('body'),
+    });
 };
 
 const submitCompose = () => {
@@ -389,31 +442,110 @@ const submitCompose = () => {
                     </p>
                 </div>
 
+                <div
+                    v-if="!conversation.is_closed && (whatsappReply || permissions.compose)"
+                    class="mt-4 space-y-3 border-t border-border pt-4"
+                >
+                    <div
+                        v-if="whatsappReply && permissions.compose"
+                        class="flex gap-1"
+                        role="tablist"
+                        aria-label="Composer"
+                    >
+                        <Button
+                            type="button"
+                            size="sm"
+                            role="tab"
+                            :aria-selected="composerTab === 'whatsapp'"
+                            :variant="composerTab === 'whatsapp' ? 'default' : 'secondary'"
+                            @click="composerTab = 'whatsapp'"
+                        >
+                            WhatsApp reply
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            role="tab"
+                            :aria-selected="composerTab === 'note'"
+                            :variant="composerTab === 'note' ? 'default' : 'secondary'"
+                            @click="composerTab = 'note'"
+                        >
+                            Internal note
+                        </Button>
+                    </div>
+
+                    <form
+                        v-if="whatsappReply && composerTab === 'whatsapp'"
+                        class="space-y-2"
+                        @submit.prevent="submitReply"
+                    >
+                        <Label for="reply_body">WhatsApp reply</Label>
+                        <p class="text-xs text-muted-foreground">
+                            Sent to the customer on WhatsApp exactly as written.
+                        </p>
+                        <p
+                            v-if="!whatsappReply.available"
+                            class="rounded-lg border border-amber-500/40 px-3 py-2 text-sm text-amber-800 dark:text-amber-300"
+                            role="status"
+                        >
+                            {{ whatsappReply.reason }}
+                        </p>
+                        <Textarea
+                            id="reply_body"
+                            v-model="replyForm.body"
+                            :rows="4"
+                            maxlength="4096"
+                            :disabled="!whatsappReply.available || replyForm.processing"
+                            placeholder="Type your reply to the customer…"
+                        />
+                        <InputError :message="replyForm.errors.body" />
+                        <div class="flex flex-wrap items-center gap-3">
+                            <Button
+                                type="submit"
+                                :disabled="
+                                    !whatsappReply.available ||
+                                    replyForm.processing ||
+                                    replyForm.body.trim() === ''
+                                "
+                            >
+                                {{ replyForm.processing ? 'Sending…' : 'Send WhatsApp reply' }}
+                            </Button>
+                            <span
+                                v-if="whatsappReply.available && whatsappReply.window_expires_at"
+                                class="text-xs text-muted-foreground"
+                            >
+                                Free-text replies allowed until
+                                {{ formatDate(whatsappReply.window_expires_at) }}
+                            </span>
+                        </div>
+                    </form>
+
                 <form
-                    v-if="permissions.compose && !conversation.is_closed"
-                    class="mt-4 space-y-2 border-t border-border pt-4"
+                    v-else-if="permissions.compose"
+                    class="space-y-2"
                     @submit.prevent="submitCompose"
                 >
-                    <Label for="body">Compose internal outbound record</Label>
+                    <Label for="body">Internal note</Label>
                     <p class="text-xs text-muted-foreground">
-                        Creates a message history record only. Nothing is sent to
+                        Visible to staff only. Nothing is sent to the customer by
                         WhatsApp or email.
                     </p>
                     <Textarea
                         id="body"
                         v-model="composeForm.body"
-                        rows="3"
+                        :rows="3"
                         required
-                        placeholder="Type an internal outbound message record…"
+                        placeholder="Type an internal note for staff…"
                     />
                     <InputError :message="composeForm.errors.body" />
                     <Button
                         type="submit"
                         :disabled="composeForm.processing"
                     >
-                        Record outbound message
+                        Save internal note
                     </Button>
                 </form>
+                </div>
                 <p
                     v-else-if="conversation.is_closed"
                     class="mt-4 border-t border-border pt-4 text-sm text-muted-foreground"

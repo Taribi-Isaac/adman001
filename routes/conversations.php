@@ -48,4 +48,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('conversations/{conversation}/messages', [ConversationController::class, 'compose'])
         ->middleware('permission:'.Permissions::MESSAGES_COMPOSE)
         ->name('conversations.messages.store');
+
+    Route::post('conversations/{conversation}/whatsapp-reply', [ConversationController::class, 'replyWhatsApp'])
+        ->middleware('permission:'.Permissions::MESSAGES_SEND)
+        ->name('conversations.whatsapp-reply');
 });

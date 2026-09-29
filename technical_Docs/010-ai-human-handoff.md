@@ -67,7 +67,7 @@ When customer responses are enabled, **new** inbound WhatsApp conversations open
 | Human | No |
 | Closed | No |
 
-Staff **Take over** → Human (existing).  
+Staff **Take over** → Human (existing). The assigned staff member can then reply on WhatsApp from the thread (Task 032); staff replies never trigger AI or change mode.  
 Staff **Return to AI** → AI mode; does not generate a response by itself.  
 AI **request_human_handoff** / explicit human request → Human mode via `ConversationService::escalateToHuman` (unassigned).
 
@@ -207,7 +207,7 @@ Inbound WhatsApp files are stored privately and acknowledged truthfully (team wi
 - No multi-provider orchestration platform
 - No autonomous financial confirmation
 - No staff “ask AI” compose assistant yet (`ai.use`)
-- Session WhatsApp replies require Meta’s messaging window rules in production
+- Session WhatsApp replies require Meta’s 24-hour customer service window (enforced for staff replies since Task 032; AI replies are sent immediately after an inbound message)
 - OCR / media understanding deferred
 
 ---

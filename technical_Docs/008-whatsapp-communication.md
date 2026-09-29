@@ -180,7 +180,7 @@ Outside the customer-care window, Meta may still require approved templates (e.g
 
 WhatsApp threads use the existing Conversations UI.
 
-- **Human**: messages displayed; **no automatic replies**
+- **Human**: messages displayed; **no automatic replies**; the assigned staff member can send free-text **WhatsApp replies** from the thread (Task 032, below)
 - **Closed**: stays closed; new inbound opens a **new** open conversation
 - **AI** mode: Task 010 may auto-reply when AI customer responses are enabled
 
@@ -204,7 +204,20 @@ Plain URLs, query strings, email addresses, line breaks, `-`/`*` bullets, number
 ## Opt-in / compliance
 
 `contacts.whatsapp_opt_in` must be true for business-initiated template sends.  
-Meta’s messaging policies and 24-hour customer-care windows still apply at the provider; ADMAN does not replace them. Session free-form staff chat from Conversations remains internal-record unless extended later.
+Meta’s messaging policies and 24-hour customer-care windows still apply at the provider; ADMAN does not replace them.
+
+### Customer service window & staff replies (Task 032)
+
+Meta rule (Cloud API "Service messages", checked 2026-09-29): a user's message or call opens a **24-hour customer service window**, reset by each new user message; free-form (non-template) messages are allowed only while it is open, otherwise only approved templates.
+
+ADMAN applies this before queueing a staff free-text reply, using stored data only (no extra API call): the window ends 24 hours after the latest **inbound WhatsApp message** for the conversation's identity (across its conversations) — `WhatsAppOutboundService::customerServiceWindowExpiresAt()`. Calls are not recorded by ADMAN, so a call-only contact counts as closed.
+
+- Window open → reply queued as `session_text` on the existing `SendOutboundWhatsAppJob` (unique per message, 3 tries, backoff 30/120/300 s). Staff text is sent unformatted; only AI-authored session text goes through `WhatsAppTextFormatter`.
+- Window closed → nothing is queued or stored; the composer is disabled with an explanation. Template-based re-engagement is **not** available from the thread (no template management yet).
+- Retrying a failed session-text message is refused once the window has closed.
+- If Meta still rejects with error `131047` (window closed), the message is marked failed (not retried) with a clear staff-facing reason.
+
+Ownership, permission (`messages.send`) and state rules: see `003-communication-domain.md` → Staff WhatsApp reply.
 
 ---
 
@@ -212,7 +225,7 @@ Meta’s messaging policies and 24-hour customer-care windows still apply at the
 
 Reuse `messages.send` / `messages.retry` / `messages.view`.
 
-Audit: `whatsapp.queued`, `whatsapp.sent`, `whatsapp.failed`, `whatsapp.retry_queued`, `whatsapp.inbound_unknown`, `whatsapp.webhook_rejected`  
+Audit: `whatsapp.queued`, `whatsapp.ai_queued`, `whatsapp.staff_reply_queued`, `whatsapp.sent`, `whatsapp.failed`, `whatsapp.retry_queued`, `whatsapp.inbound_unknown`, `whatsapp.webhook_rejected`  
 (Not every delivery-status webhook.)
 
 ---
@@ -228,7 +241,8 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 - OCR / vision of inbound customer files
 - Automated recurring auto-send of invoices (invoice reminders owned by Task 009)
 - Broadcast / marketing campaigns
-- Staff free-form WhatsApp composer (AI session text exists in Task 010; staff compose remains internal-record by default)
+- Template-based re-engagement from the thread when the 24-hour window is closed (staff free-text replies exist since Task 032)
+- Broadcast / bulk WhatsApp and email messaging (separate future task: consent, recipients, templates, scheduling, rate limits, opt-out)
 - Delivery/read UI polish beyond status labels
 - Personal forwarding of inbound files to arbitrary admin phone numbers
 

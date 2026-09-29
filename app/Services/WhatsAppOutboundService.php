@@ -24,12 +24,14 @@ use App\Models\Message;
 use App\Models\Payment;
 use App\Models\Quote;
 use App\Models\User;
+use App\Support\Permissions;
 use App\Support\WhatsAppDeliveryPayload;
 use App\Support\WhatsAppDeliveryResult;
 use App\Support\WhatsAppDocumentPayload;
 use App\Support\WhatsAppPhone;
 use App\Support\WhatsAppTextPayload;
 use App\WhatsApp\WhatsAppTextFormatter;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -43,6 +45,9 @@ use Illuminate\Validation\ValidationException;
  */
 class WhatsAppOutboundService
 {
+    /** Meta customer service window: free-form messages allowed for 24h after the user's last message. */
+    public const CUSTOMER_SERVICE_WINDOW_HOURS = 24;
+
     public function __construct(
         private readonly ConversationService $conversations,
         private readonly DocumentService $documents,
@@ -185,34 +190,16 @@ class WhatsAppOutboundService
             ]);
         }
 
-        $message = DB::transaction(function () use ($conversation, $body, $to) {
-            $message = Message::query()->create([
-                'conversation_id' => $conversation->id,
-                'direction' => MessageDirection::Outbound,
-                'channel' => CommunicationChannel::WhatsApp,
-                'body' => $body,
-                'subject' => 'AI reply',
-                'template_key' => null,
-                'document_id' => null,
-                'status' => MessageStatus::Pending,
-                'actor_type' => MessageActorType::Ai,
-                'actor_user_id' => null,
-                'external_message_id' => null,
-                'occurred_at' => now(),
-                'meta' => [
-                    'to' => $to,
-                    'delivery_kind' => 'session_text',
-                    'ai' => true,
-                ],
-            ]);
-
-            $conversation->last_message_at = $message->occurred_at;
-            $conversation->save();
-
-            return $message;
-        });
-
-        SendOutboundWhatsAppJob::dispatch($message->id);
+        $message = $this->storeSessionText($conversation, $body, [
+            'subject' => 'AI reply',
+            'actor_type' => MessageActorType::Ai,
+            'actor_user_id' => null,
+            'meta' => [
+                'to' => $to,
+                'delivery_kind' => 'session_text',
+                'ai' => true,
+            ],
+        ]);
 
         $this->auditLogger->record(
             event: 'whatsapp.ai_queued',
@@ -225,6 +212,159 @@ class WhatsAppOutboundService
         );
 
         return $message->refresh();
+    }
+
+    /**
+     * Queue a free-text WhatsApp reply written by the staff member who owns the conversation.
+     * Sent exactly as written (no AI formatting) through the same session-text delivery path.
+     */
+    public function queueStaffSessionReply(Conversation $conversation, User $staff, string $body): Message
+    {
+        $blocker = $this->staffReplyBlocker($conversation, $staff);
+        if ($blocker !== null) {
+            throw ValidationException::withMessages(['body' => $blocker]);
+        }
+
+        if (trim($body) === '') {
+            throw ValidationException::withMessages([
+                'body' => 'Reply text is required.',
+            ]);
+        }
+
+        $to = (string) WhatsAppPhone::normalize((string) $conversation->identity->external_id);
+
+        $message = $this->storeSessionText($conversation, trim($body), [
+            'subject' => null,
+            'actor_type' => MessageActorType::Staff,
+            'actor_user_id' => $staff->id,
+            'meta' => [
+                'to' => $to,
+                'delivery_kind' => 'session_text',
+                'staff_reply' => true,
+            ],
+        ]);
+
+        $this->auditLogger->record(
+            event: 'whatsapp.staff_reply_queued',
+            description: 'Staff WhatsApp reply queued',
+            auditable: $message,
+            newValues: [
+                'message_id' => $message->id,
+                'conversation_id' => $conversation->id,
+            ],
+            actor: $staff,
+        );
+
+        return $message->refresh();
+    }
+
+    /**
+     * Why the given staff member cannot send a free-text WhatsApp reply right now, or null if they can.
+     */
+    public function staffReplyBlocker(Conversation $conversation, User $staff): ?string
+    {
+        if ($conversation->channel !== CommunicationChannel::WhatsApp) {
+            return 'WhatsApp replies are only available on WhatsApp conversations.';
+        }
+
+        if (! $staff->can(Permissions::MESSAGES_SEND)) {
+            return 'You do not have permission to send WhatsApp messages.';
+        }
+
+        if (! (bool) config('adman.whatsapp.enabled', true) || ! Business::current()->outbound_whatsapp_enabled) {
+            return 'Outbound WhatsApp is currently disabled.';
+        }
+
+        if ($conversation->isClosed()) {
+            return 'This conversation is closed. Reopen it and take over to reply.';
+        }
+
+        if ($conversation->mode !== ConversationMode::Human) {
+            return 'AI is handling this conversation. Take over to reply as staff.';
+        }
+
+        if ($conversation->assigned_user_id === null) {
+            return 'Take over this conversation to reply.';
+        }
+
+        if ($conversation->assigned_user_id !== $staff->id) {
+            $owner = $conversation->assignedUser()->value('name') ?? 'another staff member';
+
+            return 'This conversation is being handled by '.$owner.'. Only the assigned staff member can reply.';
+        }
+
+        $identity = $conversation->identity;
+        if ($identity === null || ! $identity->is_active || WhatsAppPhone::normalize((string) $identity->external_id) === null) {
+            return 'This conversation has no valid WhatsApp number to reply to.';
+        }
+
+        if (! $this->customerServiceWindowOpen($conversation)) {
+            return 'WhatsApp only allows free-text replies within 24 hours of the customer\'s last message. '
+                .'The customer must message again before a normal reply can be sent (approved template messages are not available from this screen).';
+        }
+
+        return null;
+    }
+
+    /**
+     * End of Meta's 24-hour customer service window, based on the customer's latest inbound
+     * WhatsApp message stored for this identity (any of its conversations). Null if none.
+     */
+    public function customerServiceWindowExpiresAt(Conversation $conversation): ?CarbonImmutable
+    {
+        $lastInbound = Message::query()
+            ->where('direction', MessageDirection::Inbound->value)
+            ->where('channel', CommunicationChannel::WhatsApp->value)
+            ->whereIn('conversation_id', Conversation::query()
+                ->where('communication_identity_id', $conversation->communication_identity_id)
+                ->select('id'))
+            ->max('occurred_at');
+
+        if ($lastInbound === null) {
+            return null;
+        }
+
+        return CarbonImmutable::parse($lastInbound)->addHours(self::CUSTOMER_SERVICE_WINDOW_HOURS);
+    }
+
+    public function customerServiceWindowOpen(Conversation $conversation): bool
+    {
+        $expiresAt = $this->customerServiceWindowExpiresAt($conversation);
+
+        return $expiresAt !== null && $expiresAt->isFuture();
+    }
+
+    /**
+     * @param  array{subject: string|null, actor_type: MessageActorType, actor_user_id: int|null, meta: array<string, mixed>}  $attributes
+     */
+    private function storeSessionText(Conversation $conversation, string $body, array $attributes): Message
+    {
+        $message = DB::transaction(function () use ($conversation, $body, $attributes) {
+            $message = Message::query()->create([
+                'conversation_id' => $conversation->id,
+                'direction' => MessageDirection::Outbound,
+                'channel' => CommunicationChannel::WhatsApp,
+                'body' => $body,
+                'subject' => $attributes['subject'],
+                'template_key' => null,
+                'document_id' => null,
+                'status' => MessageStatus::Pending,
+                'actor_type' => $attributes['actor_type'],
+                'actor_user_id' => $attributes['actor_user_id'],
+                'external_message_id' => null,
+                'occurred_at' => now(),
+                'meta' => $attributes['meta'],
+            ]);
+
+            $conversation->last_message_at = $message->occurred_at;
+            $conversation->save();
+
+            return $message;
+        });
+
+        SendOutboundWhatsAppJob::dispatch($message->id);
+
+        return $message;
     }
 
     public function retry(Message $message, User $actor): Message
@@ -244,6 +384,13 @@ class WhatsAppOutboundService
         if (! $message->status->canRetryDelivery() && $message->status !== MessageStatus::Processing) {
             throw ValidationException::withMessages([
                 'message' => 'This message cannot be retried in its current state.',
+            ]);
+        }
+
+        $isSessionText = (is_array($message->meta) ? ($message->meta['delivery_kind'] ?? null) : null) === 'session_text';
+        if ($isSessionText && $message->conversation !== null && ! $this->customerServiceWindowOpen($message->conversation)) {
+            throw ValidationException::withMessages([
+                'message' => 'The 24-hour WhatsApp customer service window has closed, so this free-text message can no longer be sent.',
             ]);
         }
 
@@ -321,9 +468,13 @@ class WhatsAppOutboundService
                         'whatsapp' => 'Recipient WhatsApp number is missing or invalid.',
                     ]);
                 }
+                // Only AI output is normalized; staff-written text is sent as entered.
+                $body = $locked->actor_type === MessageActorType::Ai
+                    ? WhatsAppTextFormatter::format((string) $locked->body)
+                    : (string) $locked->body;
                 $result = $this->delivery->sendText(new WhatsAppTextPayload(
                     to: $to,
-                    body: WhatsAppTextFormatter::format((string) $locked->body),
+                    body: $body,
                     messageId: $locked->id,
                 ));
             } elseif ($deliveryKind === 'document_pdf') {

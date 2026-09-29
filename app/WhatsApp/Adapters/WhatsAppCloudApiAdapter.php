@@ -263,6 +263,7 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
             $status === 401, $status === 403 => 'WhatsApp authentication failed. Check server credentials.',
             $status === 404 => 'WhatsApp phone number configuration looks invalid.',
             $status === 429 => 'WhatsApp rate limit reached. Please retry later.',
+            $errorCode === '131047' => 'WhatsApp 24-hour customer service window has closed. Free-text messages need the customer to message again.',
             $errorCode === '132000', $errorCode === '132001' => 'WhatsApp template is missing or not approved.',
             $errorCode === '132012' => 'WhatsApp template parameters do not match the approved template.',
             $status >= 400 && $status < 500 => 'WhatsApp rejected the message. Check recipient and template configuration.',
