@@ -961,6 +961,26 @@ Minor/deferred items (not closure blockers): no HSTS header; `robots.txt` allows
 
 ---
 
+## Task 031 — Admin verification, human-handoff visibility & WhatsApp formatting (2026-09-29)
+
+Corrections from the live-test investigation (details in docs 001, 003, 008, 010):
+
+| Item | Change |
+|------|--------|
+| Admin verification | Settings-created users are really pre-verified (`email_verified_at` was dropped by mass assignment). Data migration verified users with a `user.created` audit event (production user 2). |
+| Take Over | Offered for AI-escalated (Human, unassigned) conversations; not offered on conversations owned by staff |
+| Human attention | Dashboard card, Conversations filter `?attention=1`, badge + handoff reason (from audit) on the thread |
+| Notification | One queued `ConversationNeedsHumanAttention` (mail + database) per AI → Human transition, to active users with `conversations.takeover` |
+| WhatsApp text | `WhatsAppTextFormatter` applied to AI session text at delivery (links → bare URL, `**b**` → `*b*`, `*i*` → `_i_`, headings → bold); stored body unchanged; prompt asks for plain WhatsApp text |
+
+Deployed `0a5d26e` via main → tests (run 36595340690) → deploy-production (run 36595780779). Local suite: 245 tests, 243 passed, 2 skipped (37 new tests).
+
+Production verification: `/up` 200, `/login` 200, unsigned webhook POST 403, `adman:production-check` and `--strict` exit 0, Horizon running, scheduler timer active, MySQL/Redis ok, Resend API 200 (domain verified), OpenAI models API 200, WhatsApp config set, failed_jobs 0, no new errors in `laravel.log`. Both users verified. Formatter output checked against stored production AI bodies (no message sent). No real notification or WhatsApp message was triggered by verification.
+
+Out of scope (unchanged): staff free-text WhatsApp replies, invitation onboarding, Return-to-AI behaviour (re-escalation noted in 010).
+
+---
+
 ## Approval reminders (from Task 016)
 
 - 1 GB Droplet with capped Horizon — **done (maxProcesses=1)**  
