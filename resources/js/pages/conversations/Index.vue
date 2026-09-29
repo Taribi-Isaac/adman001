@@ -27,6 +27,7 @@ type ConversationRow = {
         status_label: string;
     } | null;
     assigned_user: { id: number; name: string } | null;
+    needs_attention: boolean;
 };
 
 type PaginatedConversations = {
@@ -43,6 +44,7 @@ const props = defineProps<{
         search: string;
         mode: string;
         channel: string;
+        attention: boolean;
     };
     modeOptions: Array<{ value: string; label: string }>;
     channelOptions: Array<{ value: string; label: string }>;
@@ -61,6 +63,7 @@ const flashSuccess = computed(() => page.props.flash?.success);
 const search = ref(props.filters.search);
 const mode = ref(props.filters.mode);
 const channel = ref(props.filters.channel);
+const attention = ref(props.filters.attention);
 
 watch(
     () => props.filters,
@@ -68,6 +71,7 @@ watch(
         search.value = value.search;
         mode.value = value.mode;
         channel.value = value.channel;
+        attention.value = value.attention;
     },
 );
 
@@ -78,6 +82,7 @@ const applyFilters = () => {
             search: search.value || undefined,
             mode: mode.value || undefined,
             channel: channel.value || undefined,
+            attention: attention.value ? 1 : undefined,
         },
         { preserveState: true, replace: true },
     );
@@ -169,6 +174,19 @@ const formatDate = (value: string | null) =>
                     </select>
                     <Button type="submit" variant="secondary">Filter</Button>
                 </div>
+                <label
+                    for="attention"
+                    class="flex items-center gap-2 text-sm md:col-span-4"
+                >
+                    <input
+                        id="attention"
+                        v-model="attention"
+                        type="checkbox"
+                        class="size-4 rounded border-input"
+                        @change="applyFilters"
+                    />
+                    Needs attention only (Human mode, nobody assigned)
+                </label>
             </form>
 
             <div class="overflow-x-auto">
@@ -212,6 +230,12 @@ const formatDate = (value: string | null) =>
                                     :class="modeClass(conversation.mode)"
                                 >
                                     {{ conversation.mode_label }}
+                                </span>
+                                <span
+                                    v-if="conversation.needs_attention"
+                                    class="mt-1 block text-xs font-medium text-amber-800 dark:text-amber-300"
+                                >
+                                    Needs attention
                                 </span>
                             </td>
                             <td class="px-2 py-3">

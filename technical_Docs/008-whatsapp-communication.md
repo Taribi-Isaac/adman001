@@ -186,6 +186,21 @@ WhatsApp threads use the existing Conversations UI.
 
 ---
 
+## Outbound text formatting (Task 031)
+
+AI output often contains Markdown, which WhatsApp does not render. Session text (`delivery_kind = session_text`, i.e. AI replies) is passed through `App\WhatsApp\WhatsAppTextFormatter` **at delivery time only**; the stored message body keeps the original AI text. Template and document sends are not touched.
+
+| Markdown | Sent to WhatsApp |
+| --- | --- |
+| `[label](https://url)` / `<https://url>` | `https://url` (bare URL; WhatsApp auto-links it) |
+| `**bold**` / `__bold__` | `*bold*` |
+| `*italic*` (single asterisks) | `_italic_` |
+| `# Heading` … `###### Heading` | `*Heading*` |
+
+Plain URLs, query strings, email addresses, line breaks, `-`/`*` bullets, numbered lists and ordinary punctuation are left unchanged. The AI system prompt also asks for plain WhatsApp text with bare URLs (secondary; the formatter is the guarantee). Tests: `tests/Unit/WhatsAppTextFormatterTest.php`.
+
+---
+
 ## Opt-in / compliance
 
 `contacts.whatsapp_opt_in` must be true for business-initiated template sends.  

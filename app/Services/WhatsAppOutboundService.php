@@ -29,6 +29,7 @@ use App\Support\WhatsAppDeliveryResult;
 use App\Support\WhatsAppDocumentPayload;
 use App\Support\WhatsAppPhone;
 use App\Support\WhatsAppTextPayload;
+use App\WhatsApp\WhatsAppTextFormatter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -322,7 +323,7 @@ class WhatsAppOutboundService
                 }
                 $result = $this->delivery->sendText(new WhatsAppTextPayload(
                     to: $to,
-                    body: (string) $locked->body,
+                    body: WhatsAppTextFormatter::format((string) $locked->body),
                     messageId: $locked->id,
                 ));
             } elseif ($deliveryKind === 'document_pdf') {

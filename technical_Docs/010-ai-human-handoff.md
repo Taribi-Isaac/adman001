@@ -73,6 +73,17 @@ AI **request_human_handoff** / explicit human request → Human mode via `Conver
 
 AI cannot change conversation mode except through the handoff tool.
 
+### Handoff notification (Task 031)
+
+When `escalateToHuman` actually moves a conversation from AI to Human/unassigned, one `ConversationNeedsHumanAttention` notification (queued; `database` + `mail` via the existing Resend mailer, same pattern as `InboundAttachmentReceived`) is sent to **active** users with `conversations.takeover`. It contains the conversation number, customer name/identifier, the handoff reason (truncated) and a link to the thread.
+
+- The transition is a conditional update (`WHERE mode = 'ai'`), so duplicate webhooks, repeated AI processing or retries of the same inbound message cannot notify twice; already-Human conversations return early.
+- Further customer messages while the conversation is still Human do **not** notify.
+- Return to AI followed by a new escalation notifies again.
+- Take over / return / close do not notify.
+
+Observed behaviour kept for the next conversation-lifecycle review: after **Return to AI**, the next customer message is answered with the full history in context, so an earlier "speak to support" request can make the AI hand off again (seen on production conversation 10, 2026-09-28).
+
 ---
 
 ## Controlled tools
@@ -167,6 +178,7 @@ Prompt/response bodies are not stored in audit.
 ## Testing
 
 `tests/Feature/AiHumanHandoffTest.php` covers settings permissions, mode gating, authorization, payment-claim safety, handoff, idempotency, provider failure, job dispatch.
+`tests/Feature/HumanAttentionTest.php` covers handoff notifications (recipients, idempotency, re-escalation), Take Over on escalated conversations, the needs-attention filter/dashboard card, and the WhatsApp-formatted AI payload.
 
 Automated tests bind `FakeAiProvider` (no external API).
 

@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Conversations\ComposeMessageRequest;
 use App\Http\Requests\Conversations\LinkContactRequest;
 use App\Http\Requests\Conversations\StoreConversationRequest;
+use App\Models\AuditEvent;
 use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
@@ -30,6 +31,7 @@ class ConversationController extends Controller
         $search = trim((string) $request->query('search', ''));
         $mode = $request->query('mode');
         $channel = $request->query('channel');
+        $attention = $request->boolean('attention');
 
         $conversations = Conversation::query()
             ->with(['identity', 'contact', 'assignedUser:id,name'])
@@ -54,6 +56,7 @@ class ConversationController extends Controller
                 is_string($channel) && in_array($channel, CommunicationChannel::values(), true),
                 fn ($q) => $q->where('channel', $channel),
             )
+            ->when($attention, fn ($q) => $q->needsHumanAttention())
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
             ->paginate(25)
@@ -66,6 +69,7 @@ class ConversationController extends Controller
                 'search' => $search,
                 'mode' => is_string($mode) ? $mode : '',
                 'channel' => is_string($channel) ? $channel : '',
+                'attention' => $attention,
             ],
             'modeOptions' => collect(ConversationMode::cases())->map(fn (ConversationMode $m) => [
                 'value' => $m->value,
@@ -180,6 +184,7 @@ class ConversationController extends Controller
             'attachments' => $attachments,
             'permissions' => [
                 'takeover' => $user?->can(Permissions::CONVERSATIONS_TAKEOVER) ?? false,
+                'take_over_available' => $this->takeOverAvailable($conversation),
                 'close' => $user?->can(Permissions::CONVERSATIONS_CLOSE) ?? false,
                 'link' => $user?->can(Permissions::CONVERSATIONS_LINK_CONTACT) ?? false,
                 'compose' => $user?->can(Permissions::MESSAGES_COMPOSE) ?? false,
@@ -315,7 +320,56 @@ class ConversationController extends Controller
                 'status_label' => $conversation->contact->status->label(),
             ] : null,
             'assigned_user' => $conversation->assignedUser?->only(['id', 'name']),
+            'needs_attention' => $conversation->needsHumanAttention(),
         ];
+    }
+
+    /**
+     * Staff may claim an AI conversation or an unassigned human (escalated) one.
+     * Conversations already owned by a staff member are not offered for takeover.
+     */
+    private function takeOverAvailable(Conversation $conversation): bool
+    {
+        if (! (auth()->user()?->can(Permissions::CONVERSATIONS_TAKEOVER) ?? false)) {
+            return false;
+        }
+
+        if ($conversation->isClosed()) {
+            return false;
+        }
+
+        return $conversation->mode !== ConversationMode::Human
+            || $conversation->assigned_user_id === null;
+    }
+
+    /**
+     * Reason from the most recent AI escalation, if the conversation is still in the human
+     * phase that escalation started (read from the audit trail; not stored elsewhere).
+     */
+    private function currentHandoffReason(Conversation $conversation): ?string
+    {
+        if ($conversation->mode !== ConversationMode::Human) {
+            return null;
+        }
+
+        $latest = AuditEvent::query()
+            ->where('auditable_type', $conversation->getMorphClass())
+            ->where('auditable_id', $conversation->id)
+            ->whereIn('event', [
+                'conversation.escalated_to_human',
+                'conversation.returned_to_ai',
+                'conversation.reopened',
+            ])
+            ->latest('id')
+            ->first();
+
+        if ($latest?->event !== 'conversation.escalated_to_human') {
+            return null;
+        }
+
+        $reason = $latest->new_values['reason'] ?? null;
+
+        return is_string($reason) && trim($reason) !== '' ? trim($reason) : null;
     }
 
     /**
@@ -341,6 +395,7 @@ class ConversationController extends Controller
 
         $base['created_at'] = $conversation->created_at?->toIso8601String();
         $base['closed_at'] = $conversation->closed_at?->toIso8601String();
+        $base['handoff_reason'] = $this->currentHandoffReason($conversation);
 
         return $base;
     }

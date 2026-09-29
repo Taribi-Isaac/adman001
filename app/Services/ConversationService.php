@@ -12,9 +12,13 @@ use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\User;
+use App\Notifications\ConversationNeedsHumanAttention;
+use App\Support\Permissions;
 use App\Support\WhatsAppPhone;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class ConversationService
 {
@@ -259,11 +263,24 @@ class ConversationService
             'assigned_user_id' => $conversation->assigned_user_id,
         ];
 
-        $conversation->mode = ConversationMode::Human;
-        // Leave assignment empty so any staff can pick up.
-        $conversation->assigned_user_id = null;
-        $conversation->closed_at = null;
-        $conversation->save();
+        // Conditional update so only one caller performs (and announces) the transition,
+        // even if the same inbound message is processed twice concurrently.
+        $transitioned = Conversation::query()
+            ->whereKey($conversation->id)
+            ->where('mode', ConversationMode::Ai->value)
+            ->update([
+                'mode' => ConversationMode::Human->value,
+                // Leave assignment empty so any staff can pick up.
+                'assigned_user_id' => null,
+                'closed_at' => null,
+                'updated_at' => now(),
+            ]);
+
+        if ($transitioned === 0) {
+            return $conversation->refresh();
+        }
+
+        $conversation->refresh();
 
         $this->auditLogger->record(
             event: 'conversation.escalated_to_human',
@@ -277,7 +294,27 @@ class ConversationService
             ],
         );
 
-        return $conversation->refresh();
+        $this->notifyHumanAttention($conversation, $reason);
+
+        return $conversation;
+    }
+
+    private function notifyHumanAttention(Conversation $conversation, ?string $reason): void
+    {
+        try {
+            $users = User::query()
+                ->where('is_active', true)
+                ->get()
+                ->filter(fn (User $user) => $user->can(Permissions::CONVERSATIONS_TAKEOVER));
+
+            if ($users->isEmpty()) {
+                return;
+            }
+
+            Notification::send($users->all(), new ConversationNeedsHumanAttention($conversation, $reason));
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     public function close(Conversation $conversation): Conversation

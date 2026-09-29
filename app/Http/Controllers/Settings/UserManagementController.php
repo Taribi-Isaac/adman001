@@ -48,13 +48,14 @@ class UserManagementController extends Controller
 
         $data = $request->validated();
 
-        $user = User::query()->create([
+        $user = User::query()->make([
             'name' => $data['name'],
             'email' => $data['email'],
             'password' => Hash::make($data['password']),
             'is_active' => $data['is_active'] ?? true,
-            'email_verified_at' => now(),
         ]);
+        // email_verified_at is not mass-assignable; staff accounts created here are pre-verified by design.
+        $user->forceFill(['email_verified_at' => now()])->save();
 
         if (! empty($data['role']) && ($request->user()?->can(Permissions::USERS_MANAGE_ROLES) ?? false)) {
             $user->syncRoles([$data['role']]);

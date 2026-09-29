@@ -111,8 +111,18 @@ Internal compose and seed inbound records created in this task always use `recor
 | **Human** | Staff controls the conversation. Future AI must not reply. |
 | **Closed** | Closed; no automated processing. History preserved. |
 
+### Human attention vs human takeover (no extra state)
+
+| Condition | Meaning |
+| --- | --- |
+| Human + no assigned user (not closed) | **Human attention required** — typically after AI handoff; nobody has claimed it |
+| Human + assigned user | **Human takeover** — a staff member owns it |
+
+`Conversation::needsHumanAttention()` / `scopeNeedsHumanAttention()` encode the first row. It drives the dashboard card **Human attention required**, the Conversations list filter **Needs attention only** (`?attention=1`), and the badge on the thread page. The thread page also shows the **handoff reason** from the latest `conversation.escalated_to_human` audit event while that human phase is current (not stored elsewhere).
+
 ### Human takeover
 
+- **Take over** is offered when the user has `conversations.takeover`, the conversation is not closed, and it is either in AI mode or in Human mode with nobody assigned (AI-escalated). It is not offered on conversations already owned by a staff member (the service itself does not block reassignment; the UI does not offer it).
 - Sets mode to Human, assigns current staff user, audits `conversation.taken_over`.
 - Deliberate; composing a message does **not** auto-takeover beyond existing mode rules.
 - Returning to AI sets mode to AI, clears assignment, audits `conversation.returned_to_ai`, and does **not** generate an AI response.

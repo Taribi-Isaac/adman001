@@ -43,6 +43,8 @@ type ConversationDetail = {
         organization_name: string | null;
     } | null;
     assigned_user: { id: number; name: string } | null;
+    needs_attention: boolean;
+    handoff_reason: string | null;
 };
 
 type MessageRow = {
@@ -98,6 +100,7 @@ const props = defineProps<{
     attachments: AttachmentRow[];
     permissions: {
         takeover: boolean;
+        take_over_available: boolean;
         close: boolean;
         link: boolean;
         compose: boolean;
@@ -220,12 +223,25 @@ const submitCompose = () => {
                         conversation.channel_label
                     }}</span>
                     <span
+                        v-if="conversation.needs_attention"
+                        class="inline-flex items-center rounded-full border border-amber-500/40 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-300"
+                    >
+                        Human attention required
+                    </span>
+                    <span
                         v-if="conversation.assigned_user"
                         class="text-muted-foreground"
                     >
                         Assigned: {{ conversation.assigned_user.name }}
                     </span>
                 </div>
+                <p
+                    v-if="conversation.handoff_reason"
+                    class="max-w-xl text-sm"
+                >
+                    <span class="text-muted-foreground">Handoff reason:</span>
+                    {{ conversation.handoff_reason }}
+                </p>
                 <p class="max-w-xl text-xs text-muted-foreground">
                     AI replies only in AI mode. Take over to pause AI; return to AI when ready.
                 </p>
@@ -233,7 +249,7 @@ const submitCompose = () => {
 
             <div class="flex flex-wrap gap-2">
                 <Button
-                    v-if="permissions.takeover && !conversation.is_closed && conversation.mode !== 'human'"
+                    v-if="permissions.take_over_available"
                     type="button"
                     @click="takeOver"
                 >

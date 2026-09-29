@@ -9,6 +9,7 @@ use App\Enums\QuoteStatus;
 use App\Enums\ReminderOccurrenceStatus;
 use App\Models\AuditEvent;
 use App\Models\Business;
+use App\Models\Conversation;
 use App\Models\Invoice;
 use App\Models\PaymentClaim;
 use App\Models\Quote;
@@ -64,6 +65,10 @@ class DashboardController extends Controller
             ])
             ->count();
 
+        $conversationsNeedingAttention = Conversation::query()
+            ->needsHumanAttention()
+            ->count();
+
         $recentActivity = AuditEvent::query()
             ->with('actor:id,name')
             ->orderByDesc('id')
@@ -84,6 +89,15 @@ class DashboardController extends Controller
                 'business_name' => $business->name,
             ],
             'metrics' => [
+                [
+                    'key' => 'human_attention_required',
+                    'label' => 'Human attention required',
+                    'count' => $conversationsNeedingAttention,
+                    'hint' => 'Conversations handed to staff that nobody has taken over yet',
+                    'href' => route('conversations.index', ['attention' => 1], false),
+                    'empty' => 'No conversations waiting for staff',
+                    'visible' => $user?->can(Permissions::CONVERSATIONS_VIEW) ?? false,
+                ],
                 [
                     'key' => 'outstanding_invoices',
                     'label' => 'Outstanding invoices',

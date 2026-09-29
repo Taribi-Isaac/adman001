@@ -51,6 +51,7 @@ Contacts domain documentation: `technical_Docs/002-contacts-domain.md`.
 - Customers do **not** have application accounts.
 - Password reset, email verification, 2FA, and passkeys remain available for staff.
 - Inactive users (`users.is_active = false`) are logged out by `EnsureUserIsActive`.
+- Staff accounts created by an administrator in **Settings → Users** are created **pre-verified** (`email_verified_at` set on create; the administrator sets the password). No verification email is sent. `email_verified_at` is not mass-assignable, so it is set with `forceFill` (Task 031 fix — it was previously discarded silently). Migration `2026_09_29_120000_verify_settings_created_users` verified existing users that have a `user.created` audit event. Invitation onboarding remains deferred.
 
 ## Super Administrator bootstrap
 

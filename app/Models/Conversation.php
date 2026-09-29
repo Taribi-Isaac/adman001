@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\CommunicationChannel;
 use App\Enums\ConversationMode;
 use Database\Factories\ConversationFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -63,6 +64,28 @@ class Conversation extends Model
     public function isHumanControlled(): bool
     {
         return $this->mode === ConversationMode::Human;
+    }
+
+    /**
+     * Human mode with nobody assigned (e.g. after AI handoff) — waiting for staff to take over.
+     */
+    public function needsHumanAttention(): bool
+    {
+        return $this->mode === ConversationMode::Human
+            && $this->assigned_user_id === null
+            && $this->closed_at === null;
+    }
+
+    /**
+     * @param  Builder<Conversation>  $query
+     * @return Builder<Conversation>
+     */
+    public function scopeNeedsHumanAttention(Builder $query): Builder
+    {
+        return $query
+            ->where('mode', ConversationMode::Human->value)
+            ->whereNull('assigned_user_id')
+            ->whereNull('closed_at');
     }
 
     /**
