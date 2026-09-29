@@ -203,6 +203,31 @@ class HumanAttentionTest extends TestCase
                 ->where('conversation.handoff_reason', 'Customer asked for a person'));
     }
 
+    public function test_take_over_cannot_claim_conversation_owned_by_another_staff_member(): void
+    {
+        $owner = $this->createStaffUser();
+        $other = $this->createStaffUser();
+        $conversation = $this->aiConversation();
+        app(ConversationService::class)->escalateToHuman($conversation, 'Needs a person');
+
+        $this->actingAs($owner)->post(route('conversations.take-over', $conversation))->assertRedirect();
+
+        $this->actingAs($other)
+            ->post(route('conversations.take-over', $conversation))
+            ->assertRedirect()
+            ->assertSessionHasErrors('mode');
+
+        $conversation->refresh();
+        $this->assertSame(ConversationMode::Human, $conversation->mode);
+        $this->assertSame($owner->id, $conversation->assigned_user_id);
+        $this->assertSame(1, AuditEvent::query()->where('event', 'conversation.taken_over')->count());
+
+        $this->actingAs($owner)
+            ->post(route('conversations.take-over', $conversation))
+            ->assertSessionHasNoErrors();
+        $this->assertSame($owner->id, $conversation->refresh()->assigned_user_id);
+    }
+
     public function test_staff_can_take_over_escalated_conversation(): void
     {
         $staff = $this->createStaffUser();

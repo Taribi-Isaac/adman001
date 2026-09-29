@@ -123,7 +123,7 @@ Internal notes always use `recorded` and are labelled **Internal record**. Do no
 
 ### Human takeover
 
-- **Take over** is offered when the user has `conversations.takeover`, the conversation is not closed, and it is either in AI mode or in Human mode with nobody assigned (AI-escalated). It is not offered on conversations already owned by a staff member (the service itself does not block reassignment; the UI does not offer it).
+- **Take over** is offered when the user has `conversations.takeover`, the conversation is not closed, and it is either in AI mode or in Human mode with nobody assigned (AI-escalated). It is not offered on conversations already owned by a staff member, and since Task 033 the service enforces the same rule: taking over a Human conversation assigned to someone else is rejected ("already being handled by …"), atomically, so two stale clicks cannot swap ownership. Taking over your own conversation again is a no-op. There is no reassignment workflow; the only way to move an owned conversation is **Return to AI** (any user with `conversations.takeover`, audited) followed by a new Take over.
 - Sets mode to Human, assigns current staff user, audits `conversation.taken_over`.
 - Deliberate; composing a message does **not** auto-takeover beyond existing mode rules.
 - Returning to AI sets mode to AI, clears assignment, audits `conversation.returned_to_ai`, and does **not** generate an AI response.

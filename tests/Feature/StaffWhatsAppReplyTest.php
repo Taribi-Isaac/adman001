@@ -167,7 +167,7 @@ class StaffWhatsAppReplyTest extends TestCase
             ->assertRedirect(route('login'));
 
         $noSend = $this->userWithout(Permissions::MESSAGES_SEND);
-        app(ConversationService::class)->takeOver($conversation->fresh(), $noSend);
+        $conversation->forceFill(['assigned_user_id' => $noSend->id])->save();
 
         $this->actingAs($noSend)
             ->post(route('conversations.whatsapp-reply', $conversation), ['body' => 'Hi'])

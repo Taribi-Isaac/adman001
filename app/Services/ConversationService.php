@@ -195,10 +195,36 @@ class ConversationService
             'assigned_user_id' => $conversation->assigned_user_id,
         ];
 
-        $conversation->mode = ConversationMode::Human;
-        $conversation->assigned_user_id = $user->id;
-        $conversation->closed_at = null;
-        $conversation->save();
+        if ($conversation->mode === ConversationMode::Human && $conversation->assigned_user_id === $user->id) {
+            return $conversation;
+        }
+
+        // Conditional update: a Human conversation already owned by another staff member
+        // cannot be claimed (there is no reassignment workflow), including stale concurrent clicks.
+        $claimed = Conversation::query()
+            ->whereKey($conversation->id)
+            ->whereNull('closed_at')
+            ->where(fn ($query) => $query
+                ->where('mode', '!=', ConversationMode::Human->value)
+                ->orWhereNull('assigned_user_id'))
+            ->update([
+                'mode' => ConversationMode::Human->value,
+                'assigned_user_id' => $user->id,
+                'updated_at' => now(),
+            ]);
+
+        if ($claimed === 0) {
+            $conversation->refresh();
+            $owner = $conversation->assignedUser?->name ?? 'another staff member';
+
+            throw ValidationException::withMessages([
+                'mode' => $conversation->isClosed()
+                    ? 'Closed conversations cannot be taken over. Reopen first.'
+                    : "This conversation is already being handled by {$owner}.",
+            ]);
+        }
+
+        $conversation->refresh();
 
         $this->auditLogger->record(
             event: 'conversation.taken_over',
