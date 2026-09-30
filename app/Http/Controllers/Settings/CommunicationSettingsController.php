@@ -7,6 +7,7 @@ use App\Enums\WhatsAppTemplateKey;
 use App\Http\Controllers\Controller;
 use App\Models\Business;
 use App\Support\Permissions;
+use App\Support\WhatsAppTransactionalTemplate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -86,7 +87,8 @@ class CommunicationSettingsController extends Controller
             'whatsapp_templates' => collect(WhatsAppTemplateKey::cases())->map(fn (WhatsAppTemplateKey $key) => [
                 'key' => $key->value,
                 'label' => $key->label(),
-                'configured_name' => (string) config('adman.whatsapp.templates.'.$key->configKey(), ''),
+                'configured_name' => (string) config('adman.whatsapp.templates.'.$key->configKey().'.name', ''),
+                'enabled' => WhatsAppTransactionalTemplate::forKey($key) !== null,
             ])->values()->all(),
             'related' => [
                 'business' => route('settings.business.edit', absolute: false),

@@ -7,6 +7,7 @@ use App\Support\WhatsAppDeliveryPayload;
 use App\Support\WhatsAppDeliveryResult;
 use App\Support\WhatsAppDocumentPayload;
 use App\Support\WhatsAppTextPayload;
+use App\WhatsApp\WhatsAppErrorMapper;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -34,6 +35,27 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
             ];
         }
 
+        $components = [];
+
+        if ($payload->headerDocumentMediaId !== null) {
+            $document = ['id' => $payload->headerDocumentMediaId];
+            if ($payload->headerDocumentFilename !== null && $payload->headerDocumentFilename !== '') {
+                $document['filename'] = $payload->headerDocumentFilename;
+            }
+
+            $components[] = [
+                'type' => 'header',
+                'parameters' => [
+                    ['type' => 'document', 'document' => $document],
+                ],
+            ];
+        }
+
+        $components[] = [
+            'type' => 'body',
+            'parameters' => $bodyParams,
+        ];
+
         $requestBody = [
             'messaging_product' => 'whatsapp',
             'recipient_type' => 'individual',
@@ -44,12 +66,7 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
                 'language' => [
                     'code' => $payload->languageCode,
                 ],
-                'components' => [
-                    [
-                        'type' => 'body',
-                        'parameters' => $bodyParams,
-                    ],
-                ],
+                'components' => $components,
             ],
         ];
 
@@ -129,11 +146,12 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
             }
 
             $status = $response->status();
-            $retryable = $status === 429 || $status >= 500;
+            $errorCode = data_get($response->json(), 'error.code');
+            $errorCode = is_scalar($errorCode) ? (string) $errorCode : null;
 
             return WhatsAppDeliveryResult::failed(
-                $this->staffSafeFailure($status, null),
-                retryable: $retryable,
+                WhatsAppErrorMapper::reason($status, $errorCode),
+                retryable: WhatsAppErrorMapper::retryable($status, $errorCode),
             );
         } catch (ConnectionException $e) {
             report($e);
@@ -230,15 +248,11 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
 
             $status = $response->status();
             $errorCode = data_get($response->json(), 'error.code');
-            $retryable = $status === 429 || $status >= 500;
-
-            if (in_array($status, [400, 401, 403, 404], true)) {
-                $retryable = false;
-            }
+            $errorCode = is_scalar($errorCode) ? (string) $errorCode : null;
 
             return WhatsAppDeliveryResult::failed(
-                $this->staffSafeFailure($status, is_scalar($errorCode) ? (string) $errorCode : null),
-                retryable: $retryable,
+                WhatsAppErrorMapper::reason($status, $errorCode),
+                retryable: WhatsAppErrorMapper::retryable($status, $errorCode),
             );
         } catch (ConnectionException $e) {
             report($e);
@@ -255,19 +269,5 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
                 retryable: true,
             );
         }
-    }
-
-    private function staffSafeFailure(int $status, ?string $errorCode): string
-    {
-        return match (true) {
-            $status === 401, $status === 403 => 'WhatsApp authentication failed. Check server credentials.',
-            $status === 404 => 'WhatsApp phone number configuration looks invalid.',
-            $status === 429 => 'WhatsApp rate limit reached. Please retry later.',
-            $errorCode === '131047' => 'WhatsApp 24-hour customer service window has closed. Free-text messages need the customer to message again.',
-            $errorCode === '132000', $errorCode === '132001' => 'WhatsApp template is missing or not approved.',
-            $errorCode === '132012' => 'WhatsApp template parameters do not match the approved template.',
-            $status >= 400 && $status < 500 => 'WhatsApp rejected the message. Check recipient and template configuration.',
-            default => 'WhatsApp provider rejected or failed the send. Please retry later.',
-        };
     }
 }

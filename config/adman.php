@@ -12,8 +12,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | Secrets stay in environment variables. Business.outbound_whatsapp_enabled
-    | is the org-level switch. Template names must match Meta-approved templates
-    | with body parameters: {{1}} customer name, {{2}} document number, {{3}} secure URL.
+    | is the org-level switch.
+    |
+    | Transactional templates are used only when the 24-hour customer service
+    | window is closed. A template is used only when `enabled` is true AND a name
+    | is set; enable it only after Meta shows it as APPROVED (Utility, DOCUMENT
+    | header). Parameter contract: technical_Docs/008-whatsapp-communication.md.
     |
     */
 
@@ -30,10 +34,26 @@ return [
         // Max inbound media size accepted for private storage (bytes).
         'inbound_media_max_bytes' => (int) env('WHATSAPP_INBOUND_MEDIA_MAX_BYTES', 15 * 1024 * 1024),
         'templates' => [
-            'quote' => env('WHATSAPP_TEMPLATE_QUOTE', 'adman_quote'),
-            'invoice' => env('WHATSAPP_TEMPLATE_INVOICE', 'adman_invoice'),
-            'invoice_reminder' => env('WHATSAPP_TEMPLATE_INVOICE_REMINDER', 'adman_invoice_reminder'),
-            'payment_acknowledgement' => env('WHATSAPP_TEMPLATE_PAYMENT_ACK', 'adman_payment_ack'),
+            'quote' => [
+                'name' => env('WHATSAPP_TEMPLATE_QUOTE'),
+                'language' => env('WHATSAPP_TEMPLATE_QUOTE_LANGUAGE'),
+                'enabled' => (bool) env('WHATSAPP_TEMPLATE_QUOTE_ENABLED', false),
+            ],
+            'invoice' => [
+                'name' => env('WHATSAPP_TEMPLATE_INVOICE'),
+                'language' => env('WHATSAPP_TEMPLATE_INVOICE_LANGUAGE'),
+                'enabled' => (bool) env('WHATSAPP_TEMPLATE_INVOICE_ENABLED', false),
+            ],
+            'invoice_reminder' => [
+                'name' => env('WHATSAPP_TEMPLATE_INVOICE_REMINDER'),
+                'language' => env('WHATSAPP_TEMPLATE_INVOICE_REMINDER_LANGUAGE'),
+                'enabled' => (bool) env('WHATSAPP_TEMPLATE_INVOICE_REMINDER_ENABLED', false),
+            ],
+            'payment_acknowledgement' => [
+                'name' => env('WHATSAPP_TEMPLATE_PAYMENT_ACK'),
+                'language' => env('WHATSAPP_TEMPLATE_PAYMENT_ACK_LANGUAGE'),
+                'enabled' => (bool) env('WHATSAPP_TEMPLATE_PAYMENT_ACK_ENABLED', false),
+            ],
         ],
     ],
 

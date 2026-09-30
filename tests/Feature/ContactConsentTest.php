@@ -35,11 +35,13 @@ use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Spatie\Permission\Models\Role;
 use Tests\Concerns\CreatesFoundationUsers;
+use Tests\Concerns\OpensWhatsAppServiceWindow;
 use Tests\TestCase;
 
 class ContactConsentTest extends TestCase
 {
     use CreatesFoundationUsers;
+    use OpensWhatsAppServiceWindow;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -507,7 +509,6 @@ class ContactConsentTest extends TestCase
 
             return Http::response(['messages' => [['id' => 'wamid.CONSENT']]], 200);
         });
-        config(['adman.whatsapp.templates.invoice' => 'adman_invoice']);
 
         $staff = $this->createStaffUser();
         $contact = $this->customer([
@@ -515,6 +516,7 @@ class ContactConsentTest extends TestCase
             'whatsapp_broadcast_opt_out_at' => now(),
             'whatsapp_broadcast_opt_out_source' => ConsentSource::WhatsApp,
         ]);
+        $this->recordWhatsAppInboundFrom($contact);
         $invoice = app(InvoiceService::class)->issue(app(InvoiceService::class)->create([
             'contact_id' => $contact->id,
             'discount_type' => DiscountType::None->value,
@@ -527,7 +529,7 @@ class ContactConsentTest extends TestCase
             ->assertSessionHasNoErrors()
             ->assertSessionHas('success');
 
-        $message = Message::query()->where('channel', 'whatsapp')->sole();
+        $message = Message::query()->where('channel', 'whatsapp')->where('direction', 'outbound')->sole();
         $this->assertSame(MessageStatus::Sent, $message->status);
         $this->assertFalse($this->eligibility()->forWhatsApp($contact)->eligible());
     }
@@ -545,6 +547,7 @@ class ContactConsentTest extends TestCase
             'whatsapp_broadcast_opt_out_at' => now(),
             'whatsapp_broadcast_opt_out_source' => ConsentSource::WhatsApp,
         ]);
+        $this->recordWhatsAppInboundFrom($contact);
         $tz = Business::current()->timezone ?: 'UTC';
         $due = CarbonImmutable::now($tz)->addDays(7);
         $invoice = app(InvoiceService::class)->issue(app(InvoiceService::class)->create([

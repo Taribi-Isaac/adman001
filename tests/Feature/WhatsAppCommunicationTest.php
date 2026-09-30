@@ -34,11 +34,13 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Spatie\Permission\Models\Role;
 use Tests\Concerns\CreatesFoundationUsers;
+use Tests\Concerns\OpensWhatsAppServiceWindow;
 use Tests\TestCase;
 
 class WhatsAppCommunicationTest extends TestCase
 {
     use CreatesFoundationUsers;
+    use OpensWhatsAppServiceWindow;
     use RefreshDatabase;
 
     protected function setUp(): void
@@ -51,9 +53,6 @@ class WhatsAppCommunicationTest extends TestCase
             'adman.whatsapp.phone_number_id' => '123456789',
             'adman.whatsapp.app_secret' => 'test-app-secret',
             'adman.whatsapp.webhook_verify_token' => 'verify-me',
-            'adman.whatsapp.templates.quote' => 'adman_quote',
-            'adman.whatsapp.templates.invoice' => 'adman_invoice',
-            'adman.whatsapp.templates.payment_acknowledgement' => 'adman_payment_ack',
         ]);
 
         Business::current()->update(['outbound_whatsapp_enabled' => true]);
@@ -74,14 +73,20 @@ class WhatsAppCommunicationTest extends TestCase
         ];
     }
 
+    /**
+     * Opted-in customer who messaged within the last 24 hours (service window open).
+     */
     private function customerReadyForWhatsApp(string $wa = '2348012345678'): Contact
     {
-        return Contact::factory()->customer()->create([
+        $contact = Contact::factory()->customer()->create([
             'whatsapp_id' => $wa,
             'whatsapp_opt_in' => true,
             'phone' => '+'.$wa,
             'display_name' => 'WA Customer',
         ]);
+        $this->recordWhatsAppInboundFrom($contact);
+
+        return $contact;
     }
 
     /**
@@ -147,7 +152,7 @@ class WhatsAppCommunicationTest extends TestCase
             ->assertRedirect()
             ->assertSessionHas('success');
 
-        $message = Message::query()->where('channel', 'whatsapp')->first();
+        $message = Message::query()->where('channel', 'whatsapp')->where('direction', 'outbound')->first();
         $this->assertNotNull($message);
         $this->assertSame(MessageStatus::Sent, $message->status);
         $this->assertSame('wamid.TEST123', $message->external_message_id);
@@ -275,7 +280,7 @@ class WhatsAppCommunicationTest extends TestCase
         app(WhatsAppOutboundService::class)->deliverQueuedMessage($message->fresh());
 
         $this->assertSame(MessageStatus::Sent, $message->fresh()->status);
-        $this->assertSame(1, Message::query()->where('channel', 'whatsapp')->count());
+        $this->assertSame(1, Message::query()->where('channel', 'whatsapp')->where('direction', 'outbound')->count());
     }
 
     public function test_webhook_verification_and_invalid_signature(): void

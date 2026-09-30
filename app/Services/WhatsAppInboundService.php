@@ -14,6 +14,7 @@ use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Support\WhatsAppPhone;
+use App\WhatsApp\WhatsAppErrorMapper;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -129,7 +130,12 @@ class WhatsAppInboundService
                 }
                 $errors = $status['errors'] ?? null;
                 $reason = 'WhatsApp reported delivery failure.';
-                if (is_array($errors) && isset($errors[0]['title']) && is_string($errors[0]['title'])) {
+                $code = is_array($errors) && isset($errors[0]['code']) && is_scalar($errors[0]['code'])
+                    ? (string) $errors[0]['code']
+                    : null;
+                if (($mappedReason = WhatsAppErrorMapper::reasonForCode($code)) !== null) {
+                    $reason = $mappedReason;
+                } elseif (is_array($errors) && isset($errors[0]['title']) && is_string($errors[0]['title'])) {
                     $reason = 'WhatsApp: '.$errors[0]['title'];
                 }
 

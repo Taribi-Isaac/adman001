@@ -61,8 +61,9 @@ Placeholders in `.env.example` (never commit secrets):
 - `WHATSAPP_API_VERSION`, `WHATSAPP_API_BASE_URL`
 - `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`
 - `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`
-- `WHATSAPP_TEMPLATE_LANGUAGE`
-- `WHATSAPP_TEMPLATE_QUOTE`, `WHATSAPP_TEMPLATE_INVOICE`, `WHATSAPP_TEMPLATE_INVOICE_REMINDER`, `WHATSAPP_TEMPLATE_PAYMENT_ACK`
+- `WHATSAPP_TEMPLATE_LANGUAGE` (default language for all templates)
+- `WHATSAPP_TEMPLATE_QUOTE`, `WHATSAPP_TEMPLATE_INVOICE`, `WHATSAPP_TEMPLATE_INVOICE_REMINDER`, `WHATSAPP_TEMPLATE_PAYMENT_ACK` (names; no code default)
+- `WHATSAPP_TEMPLATE_<KEY>_ENABLED` (default `false`) and optional `WHATSAPP_TEMPLATE_<KEY>_LANGUAGE` for each of the four keys above — see Templates
 - `WHATSAPP_INBOUND_MEDIA_MAX_BYTES`
 
 Business setting: `outbound_whatsapp_enabled` (org kill switch). Secrets stay in env.
@@ -121,18 +122,22 @@ Unknown inbound senders create an identity **without** creating a Customer.
 
 `pending` → `processing` → `sent` → (`delivered` / `read` via webhook) or `failed`
 
-Document sends use **`delivery_kind=document_pdf`**:
+Transactional document sends (quote, invoice, invoice reminder, payment acknowledgement) choose a mode from the **24-hour customer service window** (Task 036). The window is open for 24 hours after the latest inbound WhatsApp message stored for the customer's identity, across all its conversations (`customerServiceWindowOpen`). A customer who has never messaged counts as closed.
 
-1. Ensure PDF exists on private storage  
-2. Upload media to Meta (`WhatsAppDeliveryAdapter::uploadMedia`)  
-3. Send WhatsApp **document** message with caption (`sendDocument`)  
+| Window | Template for this document enabled? | Result (`meta.delivery_kind`) |
+| --- | --- | --- |
+| Open | not needed | `document_pdf`: upload PDF, then send a normal **document** message with caption |
+| Closed | yes | `document_template`: upload PDF, then send the approved Utility **template** with the PDF as its DOCUMENT header |
+| Closed | no | **Blocked**: nothing stored or sent; `whatsapp.blocked` audit; staff see the reason on the page; reminders become `not_deliverable` with the reason |
 
-Secure document URLs may still be stored on the message for internal/browser use but are not the primary customer delivery mechanism.
+The decision is made when queuing and **again at send time** (`deliverDocument`), because the window can open or close between queue, delay and retry. If it closed and no template is enabled, the message fails with a clear reason, is not retried, and the provider is not called. Retrying it is refused until a template is enabled or the customer messages again. The mode actually used is written back to `meta.delivery_kind` (and `template_name` / `template_language`).
 
-Requires:
+The PDF is always an attachment (document message, or template DOCUMENT header). The secure link is still created: it's stored on the message for browser use, and it's the last template body variable (link fallback).
+
+Requires (unchanged):
 
 - Customer contact
-- `whatsapp_opt_in = true`
+- `whatsapp_opt_in = true` (transactional gate; broadcast opt-out and email consent are **not** consulted)
 - Valid WhatsApp number
 - Eligible document (not draft / unconfirmed payment)
 - Readable private PDF file
@@ -164,15 +169,66 @@ Guarantee: **at-least-once** processing; external exactly-once cannot be promise
 
 ## Templates
 
-Env-configured names. Operators must create matching Meta templates with three body variables as above.
+Templates are created and approved in Meta (WhatsApp Manager). ADMAN only consumes them (`App\Support\WhatsAppTransactionalTemplate`, `config/adman.php` → `whatsapp.templates.<key>`: `name`, `language`, `enabled`). A template is used only when **`enabled` is true and a name is set**. Enabled defaults to `false`, so a name alone (application configuration) is never treated as a Meta-approved template.
+
+### Current state (verified read-only via the Graph API, 2026-09-30)
+
+| Key | Application configuration (prod `.env` name) | Meta-approved template | ADMAN enabled |
+| --- | --- | --- | --- |
+| `quote` | `adman_quote` | **none** | no |
+| `invoice` | `adman_invoice` | **none** | no |
+| `invoice_reminder` | `adman_invoice_reminder` | **none** | no |
+| `payment_acknowledgement` | `adman_payment_ack` | **none** | no |
+
+The only template in the WhatsApp Business Account is Meta's sample `hello_world` (Utility, `en_US`, approved), which ADMAN doesn't use. So today, in-window document sends work, and out-of-window sends are blocked with a clear reason.
+
+### Templates the owner needs to create (Utility)
+
+All four: category **Utility**, language to match `WHATSAPP_TEMPLATE_LANGUAGE` (currently `en`; if you create them as `en_US` or `en_GB`, set that value or the per-template `_LANGUAGE`). Header type **Document** (Meta asks for a sample PDF when you submit), and **no buttons**. The body must not start or end with a variable. Suggested names match the current configuration; any approved name works if the env is updated.
+
+| Purpose | Suggested name | Body variables (ADMAN data) | Suggested body text |
+| --- | --- | --- | --- |
+| Quote delivery | `adman_quote` | {{1}} contact display name · {{2}} quote number · {{3}} secure document link | `Hello {{1}}, please find attached your quote {{2}} from <business name>. You can also view it here: {{3}} Reply to this message if you have any questions.` |
+| Invoice delivery | `adman_invoice` | {{1}} contact display name · {{2}} invoice number · {{3}} secure document link | `Hello {{1}}, your invoice {{2}} from <business name> is attached. You can also view it here: {{3}} Thank you for your business.` |
+| Invoice reminder | `adman_invoice_reminder` | {{1}} contact display name · {{2}} invoice number · {{3}} outstanding balance with currency (e.g. `NGN 25,000.00`) · {{4}} due date (e.g. `7 Oct 2026`) · {{5}} secure document link | `Hello {{1}}, this is a reminder that invoice {{2}} has an outstanding balance of {{3}}, due {{4}}. The invoice is attached and can also be viewed here: {{5}} Please ignore this message if you have already paid.` |
+| Payment acknowledgement | `adman_payment_ack` | {{1}} contact display name · {{2}} payment reference number · {{3}} secure document link | `Hello {{1}}, thank you. We have received your payment {{2}}. Your acknowledgement is attached and can also be viewed here: {{3}}` |
+
+The parameter order is fixed in code (`WhatsAppOutboundService::templateBodyParameters`). Meta must approve the same number of body variables, or sends fail with a "parameters do not match" error. Values are sent with whitespace collapsed; an empty value is sent as `-`.
+
+### Enabling after Meta approval (owner and engineer)
+
+1. Confirm the template shows **Approved** in WhatsApp Manager, with the exact name and language.
+2. In the server `.env`: set `WHATSAPP_TEMPLATE_<KEY>` to the approved name, `WHATSAPP_TEMPLATE_<KEY>_ENABLED=true`, and the language if it differs. Keys: `QUOTE`, `INVOICE`, `INVOICE_REMINDER`, `PAYMENT_ACK`.
+3. Rebuild the config cache with least privilege (see External setup checklist step 5), then restart Horizon.
+4. Test once with the owner's test number, with the window closed (no message from that number in the last 24 hours).
+
+Enable each template separately; unapproved ones stay disabled.
+
+### Failure visibility
+
+Send errors and failure webhooks use `App\WhatsApp\WhatsAppErrorMapper` for staff-safe reasons:
+
+- window closed (`131047`);
+- template missing (`132001`);
+- parameter mismatch (`132000` / `132012`);
+- content rejected (`132005` / `132007`);
+- template paused (`132015`) or disabled (`132016`);
+- recipient stopped receiving (`131050`);
+- undeliverable (`131026`);
+- Meta per-user limits (`131049`);
+- payment issue (`131042`);
+- account locked / restricted (`131031` / `368`);
+- quality limits (`131048`);
+- rate limits (`130429` / `131056`, retryable);
+- authentication.
+
+Other 4xx errors are not retried; 429/5xx are. Reasons appear on the message (`failure_reason`) and in the delivery lists on the quote, invoice and payment pages; nothing raw is shown to customers.
 
 ---
 
 ## Document sharing
 
-Business documents are delivered as **WhatsApp PDF document attachments** (media upload + document message). Private storage paths are never exposed as public URLs. Secure links may remain for browser viewing.
-
-Outside the customer-care window, Meta may still require approved templates (e.g. DOCUMENT header). Configure production templates to match how ADMAN sends documents.
+Business documents are delivered as **WhatsApp PDF attachments**: a document message inside the window, or the template DOCUMENT header outside it. Private storage paths are never exposed as public URLs. Secure links remain for browser viewing and as the template link fallback.
 
 ---
 
@@ -203,7 +259,7 @@ Plain URLs, query strings, email addresses, line breaks, `-`/`*` bullets, number
 
 ## Opt-in / compliance
 
-`contacts.whatsapp_opt_in` must be true for business-initiated template sends.  
+`contacts.whatsapp_opt_in` must be true for business-initiated sends (document messages and templates).  
 Meta’s messaging policies and 24-hour customer-care windows still apply at the provider; ADMAN does not replace them.
 
 ### Opt-in vs broadcast opt-out (Task 035)
@@ -213,11 +269,11 @@ Meta’s messaging policies and 24-hour customer-care windows still apply at the
 - Broadcast eligibility needs `whatsapp_opt_in` **and** a recorded `whatsapp_opt_in_at`, plus no broadcast opt-out. Pre-Task-035 opt-ins (no timestamp) are not broadcast-eligible until staff record a source.
 - Details: `002-contacts-domain.md` → Consent.
 
-### Known gap — transactional templates missing in Meta (next task)
+### Transactional templates outside the window (Task 034 finding → Task 036)
 
-Found in Task 034, **not fixed in Task 035**. The configured template names (`adman_quote`, `adman_invoice`, `adman_invoice_reminder`, `adman_payment_ack`) do not exist as approved templates in the Meta WhatsApp Business Account. Document sends are delivered as non-template media messages, which Meta only accepts inside the 24-hour customer service window. Outside it they can fail (e.g. `131047`).
+Found in Task 034: outside the 24-hour window, ADMAN sent plain document messages, which Meta rejects (`131047`). Task 036 fixed the application side: out-of-window sends now use an enabled, approved Utility template with the PDF header, or are blocked with a clear reason (Outbound lifecycle, Templates).
 
-The next dedicated engineering task must establish an approved transactional template path before any broadcast execution is built. Template names/IDs must come from Meta once the owner creates them; none are invented in code.
+**Still open, owner action:** none of the four templates exist in Meta yet, so out-of-window transactional WhatsApp stays blocked until they're created, approved and enabled. Template names and IDs come from Meta; none are invented in code.
 
 ### Customer service window & staff replies (Task 032)
 
@@ -238,7 +294,7 @@ Ownership, permission (`messages.send`) and state rules: see `003-communication-
 
 Reuse `messages.send` / `messages.retry` / `messages.view`.
 
-Audit: `whatsapp.queued`, `whatsapp.ai_queued`, `whatsapp.staff_reply_queued`, `whatsapp.sent`, `whatsapp.failed`, `whatsapp.retry_queued`, `whatsapp.inbound_unknown`, `whatsapp.webhook_rejected`  
+Audit: `whatsapp.queued` (with `delivery_kind`), `whatsapp.blocked` (window closed, no enabled template; on the quote/invoice/payment), `whatsapp.ai_queued`, `whatsapp.staff_reply_queued`, `whatsapp.sent`, `whatsapp.failed`, `whatsapp.retry_queued`, `whatsapp.inbound_unknown`, `whatsapp.webhook_rejected`  
 (Not every delivery-status webhook.)
 
 ---
@@ -254,7 +310,7 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 - OCR / vision of inbound customer files
 - Automated recurring auto-send of invoices (invoice reminders owned by Task 009)
 - Broadcast / marketing campaigns
-- Template-based re-engagement from the thread when the 24-hour window is closed (staff free-text replies exist since Task 032)
+- Template-based re-engagement from the conversation thread when the 24-hour window is closed (staff free-text replies exist since Task 032; transactional document templates since Task 036)
 - Broadcast / bulk WhatsApp and email messaging (consent foundation + eligibility exist since Task 035; recipients, templates, scheduling, rate limits and sending remain future work)
 - Delivery/read UI polish beyond status labels
 - Personal forwarding of inbound files to arbitrary admin phone numbers
@@ -265,10 +321,10 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 
 1. Meta Business Portfolio + WhatsApp Business Account + WhatsApp Cloud API app  
 2. Permanent system-user access token + Phone number ID (+ WABA id)  
-3. Create/approve templates (`adman_quote`, `adman_invoice`, `adman_invoice_reminder`, `adman_payment_ack` or configured names)  
+3. Create/approve the four Utility templates with a DOCUMENT header (see Templates), then set `WHATSAPP_TEMPLATE_<KEY>_ENABLED=true` for each approved one  
 4. Set `WHATSAPP_WEBHOOK_VERIFY_TOKEN` + `WHATSAPP_APP_SECRET` (+ access token / phone number ID) in server `.env` only  
 5. Rebuild Laravel config cache with least privilege (`umask 027`, `config.php` / routes cache `adman:www-data` **640**); keep `.env` at **600**; reload PHP-FPM; restart Horizon  
 6. Meta Dashboard → WhatsApp → Configuration: Callback URL `https://adman.raslordeckltd.com/webhooks/whatsapp`, Verify Token = exact `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, then **Verify and save** + subscribe to `messages`  
 7. Set `ADMAN_WHATSAPP_ENABLED=true` only after credentials are complete; rebuild config cache again  
-8. Confirm org `outbound_whatsapp_enabled`; mark controlled test contact `whatsapp_opt_in` for template sends  
+8. Confirm org `outbound_whatsapp_enabled`; mark controlled test contact `whatsapp_opt_in` for document/template sends  
 9. Controlled outbound → controlled inbound → AI reply → payment claim / handoff verification  

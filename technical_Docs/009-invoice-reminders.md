@@ -139,7 +139,9 @@ Requires valid customer email, `adman.email.enabled`, `outbound_email_enabled`, 
 
 ### WhatsApp
 
-Requires opt-in, valid WhatsApp identity, channel enabled, configured Meta template (`WHATSAPP_TEMPLATE_INVOICE_REMINDER`), and `WhatsAppOutboundService::queueInvoiceReminderWhatsApp`.
+Requires opt-in, valid WhatsApp identity, channel enabled, and `WhatsAppOutboundService::queueInvoiceReminderWhatsApp`.
+
+Delivery follows the 24-hour customer service window (Task 036, see `008-whatsapp-communication.md` → Outbound lifecycle). If the customer messaged in the last 24 hours, the reminder goes as a PDF document message. Otherwise it needs the approved `invoice_reminder` Utility template to be enabled (`WHATSAPP_TEMPLATE_INVOICE_REMINDER` + `WHATSAPP_TEMPLATE_INVOICE_REMINDER_ENABLED=true`). Without it, the occurrence becomes `not_deliverable` with the reason, once; the same rule and day are not re-claimed. Email reminders are unaffected. As of 2026-09-30 the template doesn't exist in Meta, so out-of-window WhatsApp reminders are not deliverable.
 
 Opt-in and provider rules are not bypassed.
 

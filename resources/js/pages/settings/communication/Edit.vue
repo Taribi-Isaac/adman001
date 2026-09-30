@@ -39,6 +39,7 @@ defineProps<{
         key: string;
         label: string;
         configured_name: string;
+        enabled: boolean;
     }>;
     related: {
         business: string;

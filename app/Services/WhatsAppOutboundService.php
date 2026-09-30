@@ -30,6 +30,7 @@ use App\Support\WhatsAppDeliveryResult;
 use App\Support\WhatsAppDocumentPayload;
 use App\Support\WhatsAppPhone;
 use App\Support\WhatsAppTextPayload;
+use App\Support\WhatsAppTransactionalTemplate;
 use App\WhatsApp\WhatsAppTextFormatter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -47,6 +48,12 @@ class WhatsAppOutboundService
 {
     /** Meta customer service window: free-form messages allowed for 24h after the user's last message. */
     public const CUSTOMER_SERVICE_WINDOW_HOURS = 24;
+
+    /** Document message sent inside the customer service window. */
+    public const KIND_DOCUMENT = 'document_pdf';
+
+    /** Approved Utility template with the PDF as DOCUMENT header, used when the window is closed. */
+    public const KIND_TEMPLATE = 'document_template';
 
     public function __construct(
         private readonly ConversationService $conversations,
@@ -312,11 +319,25 @@ class WhatsAppOutboundService
      */
     public function customerServiceWindowExpiresAt(Conversation $conversation): ?CarbonImmutable
     {
+        return $this->serviceWindowExpiresAtForIdentity($conversation->communication_identity_id);
+    }
+
+    public function customerServiceWindowOpen(Conversation $conversation): bool
+    {
+        return $this->serviceWindowOpenForIdentity($conversation->communication_identity_id);
+    }
+
+    private function serviceWindowExpiresAtForIdentity(?int $identityId): ?CarbonImmutable
+    {
+        if ($identityId === null) {
+            return null;
+        }
+
         $lastInbound = Message::query()
             ->where('direction', MessageDirection::Inbound->value)
             ->where('channel', CommunicationChannel::WhatsApp->value)
             ->whereIn('conversation_id', Conversation::query()
-                ->where('communication_identity_id', $conversation->communication_identity_id)
+                ->where('communication_identity_id', $identityId)
                 ->select('id'))
             ->max('occurred_at');
 
@@ -327,9 +348,9 @@ class WhatsAppOutboundService
         return CarbonImmutable::parse($lastInbound)->addHours(self::CUSTOMER_SERVICE_WINDOW_HOURS);
     }
 
-    public function customerServiceWindowOpen(Conversation $conversation): bool
+    private function serviceWindowOpenForIdentity(?int $identityId): bool
     {
-        $expiresAt = $this->customerServiceWindowExpiresAt($conversation);
+        $expiresAt = $this->serviceWindowExpiresAtForIdentity($identityId);
 
         return $expiresAt !== null && $expiresAt->isFuture();
     }
@@ -387,10 +408,22 @@ class WhatsAppOutboundService
             ]);
         }
 
-        $isSessionText = (is_array($message->meta) ? ($message->meta['delivery_kind'] ?? null) : null) === 'session_text';
-        if ($isSessionText && $message->conversation !== null && ! $this->customerServiceWindowOpen($message->conversation)) {
+        $deliveryKind = is_array($message->meta) ? ($message->meta['delivery_kind'] ?? null) : null;
+        $windowOpen = $this->serviceWindowOpenForIdentity($message->conversation?->communication_identity_id);
+
+        if ($deliveryKind === 'session_text' && $message->conversation !== null && ! $windowOpen) {
             throw ValidationException::withMessages([
                 'message' => 'The 24-hour WhatsApp customer service window has closed, so this free-text message can no longer be sent.',
+            ]);
+        }
+
+        $templateKey = WhatsAppTemplateKey::tryFrom((string) $message->template_key);
+        if (in_array($deliveryKind, [self::KIND_DOCUMENT, self::KIND_TEMPLATE], true)
+            && $templateKey !== null
+            && ! $windowOpen
+            && WhatsAppTransactionalTemplate::forKey($templateKey) === null) {
+            throw ValidationException::withMessages([
+                'message' => WhatsAppTransactionalTemplate::unavailableReason($templateKey),
             ]);
         }
 
@@ -477,11 +510,12 @@ class WhatsAppOutboundService
                     body: $body,
                     messageId: $locked->id,
                 ));
-            } elseif ($deliveryKind === 'document_pdf') {
-                $result = $this->deliverDocumentPdf($locked, $meta);
+            } elseif ($deliveryKind === self::KIND_DOCUMENT || $deliveryKind === self::KIND_TEMPLATE) {
+                $result = $this->deliverDocument($locked, $meta);
             } else {
-                $payload = $this->buildPayload($locked);
-                $result = $this->delivery->sendTemplate($payload);
+                throw ValidationException::withMessages([
+                    'whatsapp' => 'Unsupported WhatsApp delivery type for this message. Queue a new send.',
+                ]);
             }
 
             if (! $result->success) {
@@ -569,10 +603,6 @@ class WhatsAppOutboundService
             ]);
         }
 
-        // Secure links remain for browser/admin use; WhatsApp delivery is the PDF attachment.
-        $link = $this->documents->createSecureLink($document, $actor);
-        $secureUrl = url('/d/'.$link['plain_token']);
-
         $identity = $this->conversations->findOrCreateIdentity(
             channel: CommunicationChannel::WhatsApp,
             externalId: $to,
@@ -595,6 +625,35 @@ class WhatsAppOutboundService
             ]);
         }
 
+        // Inside the window a normal document message is valid; outside it Meta only accepts an approved template.
+        $windowOpen = $this->serviceWindowOpenForIdentity($identity->id);
+        $template = $windowOpen ? null : WhatsAppTransactionalTemplate::forKey($templateKey);
+
+        if (! $windowOpen && $template === null) {
+            $this->auditLogger->record(
+                event: 'whatsapp.blocked',
+                description: 'Transactional WhatsApp not sent: service window closed and no approved template enabled',
+                auditable: $documentable,
+                newValues: [
+                    'template' => $templateKey->value,
+                    'contact_id' => $contact->id,
+                    'to' => $to,
+                    'reason' => 'service_window_closed_template_unavailable',
+                ],
+                actor: $actor,
+            );
+
+            throw ValidationException::withMessages([
+                'whatsapp' => WhatsAppTransactionalTemplate::unavailableReason($templateKey),
+            ]);
+        }
+
+        $deliveryKind = $template === null ? self::KIND_DOCUMENT : self::KIND_TEMPLATE;
+
+        // Secure links remain for browser use and as the template's link fallback; the PDF itself is attached.
+        $link = $this->documents->createSecureLink($document, $actor);
+        $secureUrl = url('/d/'.$link['plain_token']);
+
         $conversation = $this->conversations->openConversation(
             identity: $identity,
             mode: ConversationMode::Human,
@@ -609,7 +668,10 @@ class WhatsAppOutboundService
         $documentNumber = (string) $documentable->number;
         $businessName = Business::current()->name;
         $caption = $this->documentCaption($templateKey, $businessName, $documentNumber, $documentable);
-        $body = $templateKey->label().' '.$documentNumber.' — PDF document attachment.';
+        $body = $templateKey->label().' '.$documentNumber.($deliveryKind === self::KIND_TEMPLATE
+            ? ' — approved WhatsApp template with PDF attachment (customer service window closed).'
+            : ' — PDF document attachment.');
+        $bodyParameters = $this->templateBodyParameters($templateKey, $documentable, $customerName, $documentNumber, $secureUrl);
 
         $message = DB::transaction(function () use (
             $conversation,
@@ -622,6 +684,9 @@ class WhatsAppOutboundService
             $secureUrl,
             $documentNumber,
             $caption,
+            $deliveryKind,
+            $template,
+            $bodyParameters,
         ) {
             $message = Message::query()->create([
                 'conversation_id' => $conversation->id,
@@ -636,15 +701,18 @@ class WhatsAppOutboundService
                 'actor_user_id' => $actor->id,
                 'external_message_id' => null,
                 'occurred_at' => now(),
-                'meta' => [
+                'meta' => array_filter([
                     'to' => $to,
                     'secure_url' => $secureUrl,
-                    'delivery_kind' => 'document_pdf',
+                    'delivery_kind' => $deliveryKind,
                     'caption' => $caption,
                     'filename' => $document->filename,
                     'mime_type' => $document->mime_type ?: 'application/pdf',
                     'document_number' => $documentNumber,
-                ],
+                    'body_parameters' => $bodyParameters,
+                    'template_name' => $template?->name,
+                    'template_language' => $template?->language,
+                ], fn ($value) => $value !== null),
             ]);
 
             $conversation->last_message_at = $message->occurred_at;
@@ -657,15 +725,18 @@ class WhatsAppOutboundService
 
         $this->auditLogger->record(
             event: 'whatsapp.queued',
-            description: 'Outbound document WhatsApp PDF attachment queued',
+            description: $deliveryKind === self::KIND_TEMPLATE
+                ? 'Outbound document WhatsApp queued as approved template with PDF header'
+                : 'Outbound document WhatsApp PDF attachment queued',
             auditable: $message,
-            newValues: [
+            newValues: array_filter([
                 'message_id' => $message->id,
                 'document_id' => $document->id,
                 'template' => $templateKey->value,
                 'to' => $to,
-                'delivery_kind' => 'document_pdf',
-            ],
+                'delivery_kind' => $deliveryKind,
+                'template_name' => $template?->name,
+            ], fn ($value) => $value !== null),
             actor: $actor,
         );
 
@@ -673,9 +744,12 @@ class WhatsAppOutboundService
     }
 
     /**
+     * Send a transactional PDF. The mode is re-decided at send time because the window may
+     * have opened or closed since the message was queued (delays, retries).
+     *
      * @param  array<string, mixed>  $meta
      */
-    private function deliverDocumentPdf(Message $message, array $meta): WhatsAppDeliveryResult
+    private function deliverDocument(Message $message, array $meta): WhatsAppDeliveryResult
     {
         $to = WhatsAppPhone::normalize((string) ($meta['to'] ?? $message->conversation?->identity?->external_id ?? ''));
         if ($to === null) {
@@ -697,6 +771,27 @@ class WhatsAppOutboundService
             ]);
         }
 
+        $templateKey = WhatsAppTemplateKey::from((string) $message->template_key);
+        $template = null;
+
+        if (! $this->serviceWindowOpenForIdentity($message->conversation?->communication_identity_id)) {
+            $template = WhatsAppTransactionalTemplate::forKey($templateKey);
+            if ($template === null) {
+                throw ValidationException::withMessages([
+                    'whatsapp' => WhatsAppTransactionalTemplate::unavailableReason($templateKey),
+                ]);
+            }
+        }
+
+        $meta['delivery_kind'] = $template === null ? self::KIND_DOCUMENT : self::KIND_TEMPLATE;
+        unset($meta['template_name'], $meta['template_language']);
+        if ($template !== null) {
+            $meta['template_name'] = $template->name;
+            $meta['template_language'] = $template->language;
+        }
+        $message->meta = $meta;
+        $message->save();
+
         $absolute = Storage::disk($document->disk)->path($document->path);
         $mime = (string) ($meta['mime_type'] ?? $document->mime_type ?: 'application/pdf');
         $filename = (string) ($meta['filename'] ?? $document->filename);
@@ -705,6 +800,12 @@ class WhatsAppOutboundService
         $upload = $this->delivery->uploadMedia($absolute, $mime, $filename);
         if (! $upload->success || $upload->providerMessageId === null) {
             return $upload;
+        }
+
+        if ($template !== null) {
+            return $this->delivery->sendTemplate(
+                $this->buildTemplatePayload($message, $template, $to, $upload->providerMessageId, $filename),
+            );
         }
 
         return $this->delivery->sendDocument(new WhatsAppDocumentPayload(
@@ -735,27 +836,23 @@ class WhatsAppOutboundService
         };
     }
 
-    private function buildPayload(Message $message): WhatsAppDeliveryPayload
-    {
+    private function buildTemplatePayload(
+        Message $message,
+        WhatsAppTransactionalTemplate $template,
+        string $to,
+        string $mediaId,
+        string $filename,
+    ): WhatsAppDeliveryPayload {
         $meta = is_array($message->meta) ? $message->meta : [];
-        $to = WhatsAppPhone::normalize((string) ($meta['to'] ?? $message->conversation?->identity?->external_id ?? ''));
-
-        if ($to === null) {
-            throw ValidationException::withMessages([
-                'whatsapp' => 'Recipient WhatsApp number is missing or invalid.',
-            ]);
-        }
-
-        $templateKey = WhatsAppTemplateKey::from((string) $message->template_key);
-        $templateName = (string) ($meta['template_name'] ?? $this->requireConfiguredTemplateName($templateKey));
-        $language = (string) ($meta['template_language'] ?? config('adman.whatsapp.template_language', 'en'));
         $params = $meta['body_parameters'] ?? null;
 
-        if (! is_array($params) || count($params) < 3) {
+        if (! is_array($params) || $params === []) {
             throw ValidationException::withMessages([
-                'whatsapp' => 'WhatsApp template parameters are incomplete for this message.',
+                'whatsapp' => 'WhatsApp template parameters are missing for this message. Queue a new send.',
             ]);
         }
+
+        $params = array_values(array_map('strval', $params));
 
         $secureUrl = (string) ($meta['secure_url'] ?? '');
         $document = $message->document;
@@ -763,30 +860,39 @@ class WhatsAppOutboundService
             $actor = $message->actorUser ?? User::query()->find($message->actor_user_id);
             if ($actor instanceof User) {
                 $link = $this->documents->createSecureLink($document, $actor);
-                $secureUrl = url('/d/'.$link['plain_token']);
-                $params[2] = $secureUrl;
-                $meta['secure_url'] = $secureUrl;
+                $freshUrl = url('/d/'.$link['plain_token']);
+                $params = array_map(fn (string $param) => $param === $secureUrl ? $freshUrl : $param, $params);
+                $meta['secure_url'] = $freshUrl;
                 $meta['body_parameters'] = $params;
                 $message->meta = $meta;
                 $message->save();
             }
         }
 
+        // Meta rejects empty values and newlines/tabs/long runs of spaces in template parameters.
+        $params = array_map(function (string $param): string {
+            $clean = trim((string) preg_replace('/\s+/u', ' ', $param));
+
+            return $clean === '' ? '-' : $clean;
+        }, $params);
+
         return new WhatsAppDeliveryPayload(
             to: $to,
-            templateName: $templateName,
-            languageCode: $language,
-            templateKey: $templateKey,
-            bodyParameters: array_map('strval', array_values($params)),
+            templateName: $template->name,
+            languageCode: $template->language,
+            templateKey: $template->key,
+            bodyParameters: $params,
             messageId: $message->id,
+            headerDocumentMediaId: $mediaId,
+            headerDocumentFilename: $filename,
         );
     }
 
     /**
-     * Meta-approved templates use three body parameters:
-     * {{1}} customer name, {{2}} document number, {{3}} secure URL.
-     * Invoice reminder templates should include outstanding/due wording in Meta copy;
-     * outstanding balance is always accurate on the linked invoice PDF.
+     * Body parameters for the approved Utility templates (header = the PDF document).
+     * Quote / invoice / payment acknowledgement: {{1}} customer name, {{2}} document number, {{3}} secure link.
+     * Invoice reminder: {{1}} customer name, {{2}} invoice number, {{3}} outstanding amount,
+     * {{4}} due date, {{5}} secure link.
      *
      * @return list<string>
      */
@@ -798,14 +904,11 @@ class WhatsAppOutboundService
         string $secureUrl,
     ): array {
         if ($templateKey === WhatsAppTemplateKey::InvoiceReminder && $documentable instanceof Invoice) {
-            $outstanding = number_format((float) $documentable->balance_due, 2, '.', ',');
-            $currency = (string) $documentable->currency_code;
-            $due = $documentable->due_date?->toDateString() ?? '';
-
-            // Still three Meta body slots; slot 2 carries factual invoice context for reminder templates.
             return [
                 $customerName,
-                trim($documentNumber.' · Outstanding '.$currency.' '.$outstanding.($due !== '' ? ' · Due '.$due : '')),
+                $documentNumber,
+                trim($documentable->currency_code.' '.number_format((float) $documentable->balance_due, 2, '.', ',')),
+                $documentable->due_date?->format('j M Y') ?? 'on receipt',
                 $secureUrl,
             ];
         }
@@ -862,19 +965,6 @@ class WhatsAppOutboundService
         }
 
         return $to;
-    }
-
-    private function requireConfiguredTemplateName(WhatsAppTemplateKey $templateKey): string
-    {
-        $name = (string) config('adman.whatsapp.templates.'.$templateKey->configKey(), '');
-
-        if ($name === '') {
-            throw ValidationException::withMessages([
-                'whatsapp' => 'WhatsApp template name is not configured for '.$templateKey->label().'.',
-            ]);
-        }
-
-        return $name;
     }
 
     private function assertDeliveryEnabled(): void

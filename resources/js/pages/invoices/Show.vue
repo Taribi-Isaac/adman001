@@ -153,6 +153,7 @@ defineOptions({
 
 const page = usePage();
 const flashSuccess = computed(() => page.props.flash?.success as string | undefined);
+const whatsappError = computed(() => page.props.errors?.whatsapp);
 const secureUrl = computed(
     () =>
         props.flashSecureUrl ||
@@ -248,7 +249,7 @@ const copySecureUrl = async () => {
                         postAction(
                             `/invoices/${invoice.id}/send-whatsapp`,
                             customerWhatsApp
-                                ? `Queue invoice WhatsApp template to ${customerWhatsApp}? Status will update when the provider confirms it.`
+                                ? `Send the invoice PDF on WhatsApp to ${customerWhatsApp}? Status will update when the provider confirms it.`
                                 : undefined,
                         )
                     "
@@ -272,6 +273,14 @@ const copySecureUrl = async () => {
             role="status"
         >
             {{ flashSuccess }}
+        </p>
+
+        <p
+            v-if="whatsappError"
+            class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+            role="alert"
+        >
+            {{ whatsappError }}
         </p>
 
         <section v-if="secureUrl" class="neo-surface space-y-3 border-sky-500/30 p-5">
