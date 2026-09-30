@@ -1009,6 +1009,18 @@ Controlled live UAT on the owner test conversation #5 only (times WAT):
 
 Observability: Horizon running, scheduler timer firing, failed_jobs 0, no new `laravel.log` lines during the UAT, queue empty, no outbound WhatsApp left pending/failed, `adman:production-check` and `--strict` exit 0, `adman:health` ok, `/up` and `/login` 200, unsigned webhook POST 403. No test data removed (the UAT messages are real history on the owner test conversation).
 
+## Task 035 — Broadcast consent foundation (2026-09-30)
+
+Consent fields on contacts (WhatsApp opt-in evidence, WhatsApp broadcast opt-out, email broadcast opt-in / unsubscribe, each with timestamp + controlled source), consent sections on contact create/edit (`contacts.update`, server-side), `contact.consent_changed` audit, and `BroadcastEligibilityService` (WhatsApp + email). No broadcast engine, template sending, unsubscribe endpoint or provider webhooks. Transactional sends unchanged. Details in 002 → Consent, 007, 008.
+
+Deployed `3d0db7d` via main → tests (run 36702789238) → deploy-production (run 36702958586). Migration `2026_09_30_100000_add_broadcast_consent_to_contacts` ran (nullable columns only, reversible). Local suite: 275 tests, 273 passed, 2 skipped (18 new); frontend build ok.
+
+Production data safety (read-only): 2 contacts; all 8 consent columns null; `whatsapp_opt_in` unchanged (both false, rows last updated 2026-09-26); 0 `contact.consent_changed` events; 0 contacts broadcast-eligible on either channel. No messages sent.
+
+Verification: `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, `adman:health` ok, Horizon running, scheduler timer active, failed_jobs 0, no new `laravel.log` errors (latest entries 2026-09-26).
+
+Next engineering task (before any broadcast execution): approved transactional WhatsApp template path. Configured template names do not exist in Meta, so document sends outside the 24-hour window can fail (008 → Known gap).
+
 ---
 
 ## Approval reminders (from Task 016)
