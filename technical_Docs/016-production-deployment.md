@@ -1033,6 +1033,16 @@ Verification: `/up` and `/login` 200, `adman:production-check` and `--strict` ex
 
 Next engineering task: once Meta approves the four Utility templates, a controlled production enablement and verification (owner test number, outside the window) before broadcasts.
 
+## Task 037 — Meta template enablement & controlled UAT (2026-09-30) — STOPPED AT OWNER PREREQUISITE
+
+Read-only Graph API check (`message_templates`, 12:40 WAT): the WhatsApp Business Account has only `hello_world` (Utility, `en_US`, APPROVED). None of `adman_quote`, `adman_invoice`, `adman_invoice_reminder` or `adman_payment_ack` exists in any state. This meets the task's stop condition, so nothing was enabled, no production configuration changed, and no production UAT messages were sent.
+
+Production configuration (unchanged, running `6bae031`): the four names and `WHATSAPP_TEMPLATE_LANGUAGE=en` are set; there are no `_ENABLED` or per-template `_LANGUAGE` keys, so all four resolve as disabled. Outbound messages unchanged (43), 0 pending, 0 duplicate provider message IDs, 0 `whatsapp.blocked` audits.
+
+Verification: `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, `adman:health` ok, Horizon running, scheduler timer active, failed_jobs 0, no `laravel.log` errors on 2026-09-30. Focused tests 45/45 plus eligibility 3/3; full suite re-run on unchanged application code `6bae031`: 291 tests, 289 passed, 2 skipped.
+
+Remaining owner action: create and get approval for the four Utility templates exactly as in 008 → Templates (Document header, 3 or 5 body variables, no buttons, language `en` or matching `_LANGUAGE`). Then re-run Task 037.
+
 ---
 
 ## Approval reminders (from Task 016)

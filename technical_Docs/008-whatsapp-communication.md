@@ -171,7 +171,7 @@ Guarantee: **at-least-once** processing; external exactly-once cannot be promise
 
 Templates are created and approved in Meta (WhatsApp Manager). ADMAN only consumes them (`App\Support\WhatsAppTransactionalTemplate`, `config/adman.php` → `whatsapp.templates.<key>`: `name`, `language`, `enabled`). A template is used only when **`enabled` is true and a name is set**. Enabled defaults to `false`, so a name alone (application configuration) is never treated as a Meta-approved template.
 
-### Current state (verified read-only via the Graph API, 2026-09-30)
+### Current state (verified read-only via the Graph API, 2026-09-30; re-checked at the start of Task 037, 12:40 WAT)
 
 | Key | Application configuration (prod `.env` name) | Meta-approved template | ADMAN enabled |
 | --- | --- | --- | --- |
@@ -180,7 +180,9 @@ Templates are created and approved in Meta (WhatsApp Manager). ADMAN only consum
 | `invoice_reminder` | `adman_invoice_reminder` | **none** | no |
 | `payment_acknowledgement` | `adman_payment_ack` | **none** | no |
 
-The only template in the WhatsApp Business Account is Meta's sample `hello_world` (Utility, `en_US`, approved), which ADMAN doesn't use. So today, in-window document sends work, and out-of-window sends are blocked with a clear reason.
+The only template in the WhatsApp Business Account is Meta's sample `hello_world` (Utility, `en_US`, approved), which ADMAN doesn't use. None of the four exists in Meta in any state (no draft, pending or rejected entries). So today, in-window document sends work, and out-of-window sends are blocked with a clear reason.
+
+Production `.env` has the four names and `WHATSAPP_TEMPLATE_LANGUAGE=en`. It has no `_ENABLED` or per-template `_LANGUAGE` keys, so all four are disabled by default. Task 037 (controlled enablement and production UAT) stopped at this prerequisite. No configuration was changed and nothing was sent.
 
 ### Templates the owner needs to create (Utility)
 
@@ -203,6 +205,16 @@ The parameter order is fixed in code (`WhatsAppOutboundService::templateBodyPara
 4. Test once with the owner's test number, with the window closed (no message from that number in the last 24 hours).
 
 Enable each template separately; unapproved ones stay disabled.
+
+Before enabling, check each template read-only through the Graph API (`GET /{business_account_id}/message_templates`). It needs:
+- status `APPROVED`;
+- category `UTILITY`;
+- a language code that matches the configuration exactly (WhatsApp Manager "English" is `en`; "English (US)" is `en_US`);
+- a `DOCUMENT` header;
+- the body variable count from the table above (3, or 5 for the reminder);
+- no buttons.
+
+Anything else means the template isn't enabled.
 
 ### Failure visibility
 
@@ -273,7 +285,7 @@ Meta’s messaging policies and 24-hour customer-care windows still apply at the
 
 Found in Task 034: outside the 24-hour window, ADMAN sent plain document messages, which Meta rejects (`131047`). Task 036 fixed the application side: out-of-window sends now use an enabled, approved Utility template with the PDF header, or are blocked with a clear reason (Outbound lifecycle, Templates).
 
-**Still open, owner action:** none of the four templates exist in Meta yet, so out-of-window transactional WhatsApp stays blocked until they're created, approved and enabled. Template names and IDs come from Meta; none are invented in code.
+**Still open, owner action (re-confirmed 2026-09-30, Task 037):** none of the four templates exist in Meta yet, so out-of-window transactional WhatsApp stays blocked until they're created, approved and enabled. Template names and IDs come from Meta; none are invented in code.
 
 ### Customer service window & staff replies (Task 032)
 
