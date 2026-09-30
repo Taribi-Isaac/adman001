@@ -1021,6 +1021,18 @@ Verification: `/up` and `/login` 200, `adman:production-check` and `--strict` ex
 
 Next engineering task (before any broadcast execution): approved transactional WhatsApp template path. Configured template names do not exist in Meta, so document sends outside the 24-hour window can fail (008 → Known gap).
 
+## Task 036 — Transactional WhatsApp 24-hour window safety (2026-09-30)
+
+Quote, invoice, invoice reminder and payment acknowledgement WhatsApp sends now decide the delivery mode at queue and send time: window open → PDF document message (unchanged); window closed → approved Utility template with the PDF as a DOCUMENT header, but only when `WHATSAPP_TEMPLATE_<KEY>_ENABLED=true` and a name is set; otherwise blocked with a staff-facing reason and a `whatsapp.blocked` audit (reminders become Not deliverable). No free-form fallback, no retry loop. Clearer Meta error mapping (window, missing/invalid/paused/disabled template, opt-out, account restriction). Transactional gate remains `whatsapp_opt_in`; broadcast consent does not affect it. Details in 008 → Templates and 009.
+
+Deployed `6bae031` via main → tests (run 36708281527: 289 passed, 2 skipped) → deploy-production (run 36708435698). No migrations. Local suite: 291 tests, 289 passed, 2 skipped (16 new), run as `php -d memory_limit=1G vendor/bin/pest` — the default 128M local CLI limit is exhausted by cumulative PDF generation across the single-process suite (CI has no limit).
+
+Production state: all four template names configured in env, all `_ENABLED` flags false → no template resolves; out-of-window document sends are blocked until the owner's Meta templates are APPROVED. Outbound messages unchanged (43, latest 2026-09-29 19:18), 0 `whatsapp.blocked` audits. No messages sent.
+
+Verification: `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, `adman:health` ok, Horizon running, scheduler timer active, failed_jobs 0, no `laravel.log` errors on 2026-09-30.
+
+Next engineering task: once Meta approves the four Utility templates, a controlled production enablement and verification (owner test number, outside the window) before broadcasts.
+
 ---
 
 ## Approval reminders (from Task 016)
