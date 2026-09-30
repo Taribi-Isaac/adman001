@@ -1051,6 +1051,21 @@ Production (`6bae031`, no deploy): outbound messages unchanged (43), 0 pending, 
 
 Remaining: an approved Document header on each template, plus either template bodies aligned to ADMAN's variables or an engineering change to ADMAN's per-template variable mapping.
 
+## Task 037R2 — Corrected-template verification (2026-09-30 15:17) — STOPPED, TEMPLATES STILL MISMATCHED
+
+Read-only Graph API check:
+- **`quote_sent`** (approved, Utility, `en`) now has a Document header and 3 body variables. But {{3}} is the business name ("Your quote {{2}} from {{3}} is ready."); ADMAN sends the secure link there.
+- **`invoice_sent`, `invoice_reminder`, `payment_acknowledgement`** are unchanged since 037R: no header, 5, 6 and 5 variables. No pending edits were visible.
+
+No template matches ADMAN's interface, so nothing was enabled, production `.env` is unchanged, and no live UAT was sent. ADMAN's variable mapping was not changed (Meta templates are to conform to the tested interface). Details in 008 → Templates → Current state.
+
+Production (`6bae031`, no deploy, no code change): outbound messages unchanged (43), 0 pending, 0 duplicate provider IDs, 0 `whatsapp.blocked` audits; `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, `adman:health` ok, Horizon running, scheduler timer active, failed_jobs 0, no `laravel.log` errors on 2026-09-30.
+
+Remaining owner action:
+- `quote_sent`: make {{3}} the secure document link.
+- The other three: add a Document header and use ADMAN's variables (008 → Templates).
+- Get all four re-approved, then re-run 037R2.
+
 ---
 
 ## Approval reminders (from Task 016)
