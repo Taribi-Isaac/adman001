@@ -218,7 +218,7 @@ Recorded failures include a staff-safe reason (no raw credentials). Retry uses t
 - Automated invoice reminders are owned by Task 009 (`ReminderService` → `queueInvoiceReminderEmail`); this domain still owns delivery only
 - No automatic email on recurring generation
 - No WhatsApp
-- No bulk/marketing mail
+- No bulk/marketing mail. Task 035 added broadcast consent only (`email_broadcast_opt_in_at`, `email_broadcast_unsubscribed_at`, eligibility via `BroadcastEligibilityService::forEmail`). These columns are **not** read by document sending or reminders: an unsubscribed contact still receives invoice, quote, payment-acknowledgement and reminder emails. No unsubscribe endpoint, List-Unsubscribe header or Resend webhooks yet. See `002-contacts-domain.md` → Consent
 - Amazon SES is **not** used (Resend is the production provider)
 
 ---

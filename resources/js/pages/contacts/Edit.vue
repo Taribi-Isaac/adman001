@@ -6,9 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { consentGroups } from '@/lib/contactConsent';
+import type { ConsentAtField, ConsentFlag, ConsentSourceField } from '@/lib/contactConsent';
 
 const props = defineProps<{
-    contact: {
+    contact: Partial<Record<ConsentFlag, boolean>> &
+        Partial<Record<ConsentSourceField | ConsentAtField, string | null>> & {
         id: number;
         type: string;
         first_name: string | null;
@@ -17,7 +20,6 @@ const props = defineProps<{
         email: string | null;
         phone: string | null;
         whatsapp_id: string | null;
-        whatsapp_opt_in?: boolean;
         reminder_channel?: string;
         address_line_1: string | null;
         address_line_2: string | null;
@@ -29,7 +31,11 @@ const props = defineProps<{
         display_name: string;
     };
     typeOptions: Array<{ value: string; label: string }>;
+    consentSourceOptions: Array<{ value: string; label: string }>;
 }>();
+
+const formatDate = (iso: string | null | undefined) =>
+    iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' }) : null;
 
 defineOptions({
     layout: {
@@ -49,6 +55,13 @@ const form = useForm({
     phone: props.contact.phone ?? '',
     whatsapp_id: props.contact.whatsapp_id ?? '',
     whatsapp_opt_in: Boolean(props.contact.whatsapp_opt_in),
+    whatsapp_opt_in_source: props.contact.whatsapp_opt_in_source ?? '',
+    whatsapp_broadcast_opt_out: Boolean(props.contact.whatsapp_broadcast_opt_out),
+    whatsapp_broadcast_opt_out_source: props.contact.whatsapp_broadcast_opt_out_source ?? '',
+    email_broadcast_opt_in: Boolean(props.contact.email_broadcast_opt_in),
+    email_broadcast_opt_in_source: props.contact.email_broadcast_opt_in_source ?? '',
+    email_broadcast_unsubscribed: Boolean(props.contact.email_broadcast_unsubscribed),
+    email_broadcast_unsubscribe_source: props.contact.email_broadcast_unsubscribe_source ?? '',
     reminder_channel: props.contact.reminder_channel ?? 'email',
     address_line_1: props.contact.address_line_1 ?? '',
     address_line_2: props.contact.address_line_2 ?? '',
@@ -132,17 +145,6 @@ const submit = () => {
                         </p>
                     </div>
                     <div class="space-y-2 sm:col-span-2">
-                        <label class="flex items-center gap-2 text-sm">
-                            <input
-                                v-model="form.whatsapp_opt_in"
-                                type="checkbox"
-                                class="rounded border-border"
-                            />
-                            WhatsApp business messaging opt-in
-                        </label>
-                        <InputError :message="form.errors.whatsapp_opt_in" />
-                    </div>
-                    <div class="space-y-2 sm:col-span-2">
                         <Label for="reminder_channel">Invoice reminder channel</Label>
                         <select
                             id="reminder_channel"
@@ -155,6 +157,51 @@ const submit = () => {
                         </select>
                         <InputError :message="form.errors.reminder_channel" />
                     </div>
+                </div>
+            </section>
+
+            <section
+                v-for="group in consentGroups"
+                :key="group.title"
+                class="neo-surface space-y-4 p-5"
+            >
+                <div class="space-y-1">
+                    <h2 class="text-sm font-semibold">{{ group.title }}</h2>
+                    <p class="text-xs text-muted-foreground">{{ group.description }}</p>
+                </div>
+                <div v-for="item in group.items" :key="item.flag" class="space-y-2">
+                    <label class="flex items-center gap-2 text-sm">
+                        <input
+                            v-model="form[item.flag]"
+                            type="checkbox"
+                            class="rounded border-border"
+                        />
+                        {{ item.label }}
+                    </label>
+                    <p class="text-xs text-muted-foreground">
+                        {{ item.help }}
+                        <template v-if="contact[item.flag] && formatDate(contact[item.at])">
+                            Recorded {{ formatDate(contact[item.at]) }}.
+                        </template>
+                    </p>
+                    <div v-if="form[item.flag]" class="max-w-xs space-y-1">
+                        <Label :for="item.source">How was this recorded?</Label>
+                        <select
+                            :id="item.source"
+                            v-model="form[item.source]"
+                            class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                        >
+                            <option value="">Select…</option>
+                            <option
+                                v-for="option in consentSourceOptions"
+                                :key="option.value"
+                                :value="option.value"
+                            >
+                                {{ option.label }}
+                            </option>
+                        </select>
+                    </div>
+                    <InputError :message="form.errors[item.flag] ?? form.errors[item.source]" />
                 </div>
             </section>
 

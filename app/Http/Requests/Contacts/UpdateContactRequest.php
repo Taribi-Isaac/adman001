@@ -4,6 +4,7 @@ namespace App\Http\Requests\Contacts;
 
 use App\Enums\ContactType;
 use App\Enums\ReminderChannelPreference;
+use App\Support\ContactConsent;
 use App\Support\Permissions;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -22,6 +23,7 @@ class UpdateContactRequest extends FormRequest
     public function rules(): array
     {
         return [
+            ...ContactConsent::rules(),
             'type' => ['required', Rule::enum(ContactType::class)],
             'first_name' => ['nullable', 'string', 'max:120'],
             'last_name' => ['nullable', 'string', 'max:120'],
@@ -29,7 +31,6 @@ class UpdateContactRequest extends FormRequest
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
             'whatsapp_id' => ['nullable', 'string', 'max:100'],
-            'whatsapp_opt_in' => ['sometimes', 'boolean'],
             'reminder_channel' => ['sometimes', Rule::in(ReminderChannelPreference::values())],
             'address_line_1' => ['nullable', 'string', 'max:255'],
             'address_line_2' => ['nullable', 'string', 'max:255'],
@@ -72,9 +73,13 @@ class UpdateContactRequest extends FormRequest
         ];
 
         $merged = [
-            'whatsapp_opt_in' => $this->boolean('whatsapp_opt_in'),
             'reminder_channel' => $this->input('reminder_channel', 'email'),
         ];
+        foreach (array_keys(ContactConsent::FLAGS) as $flag) {
+            if ($this->has($flag)) {
+                $merged[$flag] = $this->boolean($flag);
+            }
+        }
         foreach ($nullable as $field) {
             if ($this->input($field) === '') {
                 $merged[$field] = null;

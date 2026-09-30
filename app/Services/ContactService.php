@@ -2,10 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\ConsentSource;
 use App\Enums\ContactStatus;
 use App\Enums\ContactType;
 use App\Enums\ReminderChannelPreference;
 use App\Models\Contact;
+use App\Support\ContactConsent;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ContactService
@@ -22,18 +25,22 @@ class ContactService
         $payload = $this->preparePayload($data, defaultStatus: ContactStatus::Unknown);
         $this->assertNoDuplicateIdentifiers($payload);
 
-        $contact = Contact::query()->create($payload);
+        return DB::transaction(function () use ($payload, $data): Contact {
+            $contact = Contact::query()->create($payload);
 
-        $this->auditLogger->record(
-            event: 'contact.created',
-            description: 'Contact created',
-            auditable: $contact,
-            newValues: $contact->only([
-                'type', 'status', 'display_name', 'email', 'phone', 'whatsapp_id',
-            ]),
-        );
+            $this->auditLogger->record(
+                event: 'contact.created',
+                description: 'Contact created',
+                auditable: $contact,
+                newValues: $contact->only([
+                    'type', 'status', 'display_name', 'email', 'phone', 'whatsapp_id',
+                ]),
+            );
 
-        return $contact;
+            $this->applyConsent($contact, $data);
+
+            return $contact;
+        });
     }
 
     /**
@@ -53,19 +60,114 @@ class ContactService
 
         $this->assertNoDuplicateIdentifiers($payload, ignoreContactId: $contact->id);
 
-        $old = $contact->only(array_keys($payload));
-        $contact->fill($payload);
-        $contact->save();
+        DB::transaction(function () use ($contact, $payload, $data): void {
+            $old = $contact->only(array_keys($payload));
+            $contact->fill($payload);
+            $contact->save();
 
-        $this->auditLogger->record(
-            event: 'contact.updated',
-            description: 'Contact updated',
-            auditable: $contact,
-            oldValues: $old,
-            newValues: $contact->only(array_keys($payload)),
-        );
+            $this->auditLogger->record(
+                event: 'contact.updated',
+                description: 'Contact updated',
+                auditable: $contact,
+                oldValues: $old,
+                newValues: $contact->only(array_keys($payload)),
+            );
+
+            $this->applyConsent($contact, $data);
+        });
 
         return $contact->refresh();
+    }
+
+    /**
+     * Apply requested consent flags. Turning a flag on requires a source and stamps
+     * the time; turning it off clears both (the prior values live in the audit trail).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function applyConsent(Contact $contact, array $data): void
+    {
+        $changes = [];
+
+        foreach (ContactConsent::FLAGS as $flag => $definition) {
+            if (! array_key_exists($flag, $data)) {
+                continue;
+            }
+
+            $requested = (bool) $data[$flag];
+            $current = ContactConsent::isOn($contact, $flag);
+            $currentSource = $contact->getAttribute($definition['source']);
+            $currentAt = $contact->getAttribute($definition['at']);
+            $source = $this->consentSource($data[$definition['source']] ?? null);
+
+            if (! $requested && ! $current) {
+                continue;
+            }
+
+            if ($requested && ! $current && $source === null) {
+                throw ValidationException::withMessages([
+                    $definition['source'] => sprintf('Select how the %s was recorded.', strtolower($definition['label'])),
+                ]);
+            }
+
+            if ($requested && $current && ($source === null || ($source === $currentSource && $currentAt !== null))) {
+                continue;
+            }
+
+            $old = [
+                'state' => $current,
+                'source' => $currentSource instanceof ConsentSource ? $currentSource->value : null,
+                'at' => $currentAt?->toIso8601String(),
+            ];
+
+            if ($requested) {
+                $contact->setAttribute($definition['at'], $currentAt ?? now());
+                $contact->setAttribute($definition['source'], $source);
+            } else {
+                $contact->setAttribute($definition['at'], null);
+                $contact->setAttribute($definition['source'], null);
+            }
+
+            if ($flag === 'whatsapp_opt_in') {
+                $contact->whatsapp_opt_in = $requested;
+            }
+
+            $changes[] = [$flag, $definition, $old];
+        }
+
+        if ($changes === []) {
+            return;
+        }
+
+        $contact->save();
+
+        foreach ($changes as [$flag, $definition, $old]) {
+            $state = ContactConsent::isOn($contact, $flag);
+            $source = $contact->getAttribute($definition['source']);
+
+            $this->auditLogger->record(
+                event: 'contact.consent_changed',
+                description: sprintf('%s %s', $definition['label'], $state ? 'recorded' : 'removed'),
+                auditable: $contact,
+                oldValues: $old,
+                newValues: [
+                    'consent' => $flag,
+                    'channel' => $definition['channel']->value,
+                    'state' => $state,
+                    'source' => $source instanceof ConsentSource ? $source->value : null,
+                    'at' => $contact->getAttribute($definition['at'])?->toIso8601String(),
+                ],
+            );
+        }
+    }
+
+    private function consentSource(mixed $value): ?ConsentSource
+    {
+        if ($value instanceof ConsentSource) {
+            return $value;
+        }
+
+        return is_string($value) && $value !== '' ? ConsentSource::from($value) : null;
     }
 
     public function promote(Contact $contact, ContactStatus $target): Contact
@@ -207,10 +309,6 @@ class ContactService
             'country' => $this->nullableString($data['country'] ?? null),
             'notes' => $this->nullableString($data['notes'] ?? null),
         ];
-
-        if (array_key_exists('whatsapp_opt_in', $data)) {
-            $payload['whatsapp_opt_in'] = (bool) $data['whatsapp_opt_in'];
-        }
 
         if (array_key_exists('reminder_channel', $data) && $data['reminder_channel'] !== null && $data['reminder_channel'] !== '') {
             $payload['reminder_channel'] = $data['reminder_channel'] instanceof ReminderChannelPreference

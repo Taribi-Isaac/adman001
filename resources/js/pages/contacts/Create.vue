@@ -6,10 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { consentGroups } from '@/lib/contactConsent';
 
 defineProps<{
     typeOptions: Array<{ value: string; label: string }>;
     statusOptions: Array<{ value: string; label: string }>;
+    consentSourceOptions: Array<{ value: string; label: string }>;
+    canRecordConsent: boolean;
 }>();
 
 defineOptions({
@@ -30,6 +33,14 @@ const form = useForm({
     email: '',
     phone: '',
     whatsapp_id: '',
+    whatsapp_opt_in: false,
+    whatsapp_opt_in_source: '',
+    whatsapp_broadcast_opt_out: false,
+    whatsapp_broadcast_opt_out_source: '',
+    email_broadcast_opt_in: false,
+    email_broadcast_opt_in_source: '',
+    email_broadcast_unsubscribed: false,
+    email_broadcast_unsubscribe_source: '',
     address_line_1: '',
     address_line_2: '',
     city: '',
@@ -133,6 +144,48 @@ const submit = () => {
                     </div>
                 </div>
             </section>
+
+            <template v-if="canRecordConsent">
+                <section
+                    v-for="group in consentGroups"
+                    :key="group.title"
+                    class="neo-surface space-y-4 p-5"
+                >
+                    <div class="space-y-1">
+                        <h2 class="text-sm font-semibold">{{ group.title }}</h2>
+                        <p class="text-xs text-muted-foreground">{{ group.description }}</p>
+                    </div>
+                    <div v-for="item in group.items" :key="item.flag" class="space-y-2">
+                        <label class="flex items-center gap-2 text-sm">
+                            <input
+                                v-model="form[item.flag]"
+                                type="checkbox"
+                                class="rounded border-border"
+                            />
+                            {{ item.label }}
+                        </label>
+                        <p class="text-xs text-muted-foreground">{{ item.help }}</p>
+                        <div v-if="form[item.flag]" class="max-w-xs space-y-1">
+                            <Label :for="item.source">How was this recorded?</Label>
+                            <select
+                                :id="item.source"
+                                v-model="form[item.source]"
+                                class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                            >
+                                <option value="">Select…</option>
+                                <option
+                                    v-for="option in consentSourceOptions"
+                                    :key="option.value"
+                                    :value="option.value"
+                                >
+                                    {{ option.label }}
+                                </option>
+                            </select>
+                        </div>
+                        <InputError :message="form.errors[item.flag] ?? form.errors[item.source]" />
+                    </div>
+                </section>
+            </template>
 
             <section class="neo-surface space-y-4 p-5">
                 <h2 class="text-sm font-semibold">Address</h2>

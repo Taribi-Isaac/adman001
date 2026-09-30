@@ -4,6 +4,7 @@ namespace App\Http\Requests\Contacts;
 
 use App\Enums\ContactStatus;
 use App\Enums\ContactType;
+use App\Support\ContactConsent;
 use App\Support\Permissions;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -13,7 +14,19 @@ class StoreContactRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()?->can(Permissions::CONTACTS_CREATE) ?? false;
+        $user = $this->user();
+
+        if ($user === null || ! $user->can(Permissions::CONTACTS_CREATE)) {
+            return false;
+        }
+
+        foreach (array_keys(ContactConsent::FLAGS) as $flag) {
+            if ($this->boolean($flag) && ! $user->can(Permissions::CONTACTS_UPDATE)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -22,6 +35,7 @@ class StoreContactRequest extends FormRequest
     public function rules(): array
     {
         return [
+            ...ContactConsent::rules(),
             'type' => ['required', Rule::enum(ContactType::class)],
             'status' => ['sometimes', Rule::enum(ContactStatus::class)],
             'first_name' => ['nullable', 'string', 'max:120'],
@@ -82,6 +96,11 @@ class StoreContactRequest extends FormRequest
         ];
 
         $merged = [];
+        foreach (array_keys(ContactConsent::FLAGS) as $flag) {
+            if ($this->has($flag)) {
+                $merged[$flag] = $this->boolean($flag);
+            }
+        }
         foreach ($nullable as $field) {
             if ($this->input($field) === '') {
                 $merged[$field] = null;

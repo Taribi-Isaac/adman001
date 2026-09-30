@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ConsentSource;
 use App\Enums\ContactStatus;
 use App\Enums\ContactType;
 use App\Enums\ReminderChannelPreference;
@@ -28,6 +29,14 @@ use Illuminate\Support\Carbon;
  * @property string|null $phone
  * @property string|null $whatsapp_id
  * @property bool $whatsapp_opt_in
+ * @property Carbon|null $whatsapp_opt_in_at
+ * @property ConsentSource|null $whatsapp_opt_in_source
+ * @property Carbon|null $whatsapp_broadcast_opt_out_at
+ * @property ConsentSource|null $whatsapp_broadcast_opt_out_source
+ * @property Carbon|null $email_broadcast_opt_in_at
+ * @property ConsentSource|null $email_broadcast_opt_in_source
+ * @property Carbon|null $email_broadcast_unsubscribed_at
+ * @property ConsentSource|null $email_broadcast_unsubscribe_source
  * @property string $reminder_channel
  * @property string|null $address_line_1
  * @property string|null $address_line_2
@@ -56,6 +65,14 @@ class Contact extends Model
         'phone',
         'whatsapp_id',
         'whatsapp_opt_in',
+        'whatsapp_opt_in_at',
+        'whatsapp_opt_in_source',
+        'whatsapp_broadcast_opt_out_at',
+        'whatsapp_broadcast_opt_out_source',
+        'email_broadcast_opt_in_at',
+        'email_broadcast_opt_in_source',
+        'email_broadcast_unsubscribed_at',
+        'email_broadcast_unsubscribe_source',
         'reminder_channel',
         'address_line_1',
         'address_line_2',
@@ -76,6 +93,14 @@ class Contact extends Model
             'type' => ContactType::class,
             'status' => ContactStatus::class,
             'whatsapp_opt_in' => 'boolean',
+            'whatsapp_opt_in_at' => 'datetime',
+            'whatsapp_opt_in_source' => ConsentSource::class,
+            'whatsapp_broadcast_opt_out_at' => 'datetime',
+            'whatsapp_broadcast_opt_out_source' => ConsentSource::class,
+            'email_broadcast_opt_in_at' => 'datetime',
+            'email_broadcast_opt_in_source' => ConsentSource::class,
+            'email_broadcast_unsubscribed_at' => 'datetime',
+            'email_broadcast_unsubscribe_source' => ConsentSource::class,
             'reminder_channel' => ReminderChannelPreference::class,
             'archived_at' => 'datetime',
         ];

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Contacts;
 
+use App\Enums\ConsentSource;
 use App\Enums\ContactStatus;
 use App\Enums\ContactType;
 use App\Enums\ReminderChannelPreference;
@@ -12,6 +13,7 @@ use App\Http\Requests\Contacts\UpdateContactRequest;
 use App\Models\Contact;
 use App\Models\Payment;
 use App\Services\ContactService;
+use App\Support\ContactConsent;
 use App\Support\Permissions;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -90,6 +92,8 @@ class ContactController extends Controller
                 'value' => $s->value,
                 'label' => $s->label(),
             ]),
+            'consentSourceOptions' => $this->consentSourceOptions(),
+            'canRecordConsent' => auth()->user()?->can(Permissions::CONTACTS_UPDATE) ?? false,
         ]);
     }
 
@@ -144,6 +148,7 @@ class ContactController extends Controller
                 'value' => $t->value,
                 'label' => $t->label(),
             ]),
+            'consentSourceOptions' => $this->consentSourceOptions(),
         ]);
     }
 
@@ -226,7 +231,7 @@ class ContactController extends Controller
             'first_name' => $contact->first_name,
             'last_name' => $contact->last_name,
             'whatsapp_id' => $contact->whatsapp_id,
-            'whatsapp_opt_in' => (bool) $contact->whatsapp_opt_in,
+            ...ContactConsent::payload($contact),
             'reminder_channel' => $contact->reminder_channel instanceof ReminderChannelPreference
                 ? $contact->reminder_channel->value
                 : (string) ($contact->reminder_channel ?? 'email'),
@@ -240,6 +245,17 @@ class ContactController extends Controller
             'archived_at' => $contact->archived_at?->toIso8601String(),
             'created_at' => $contact->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @return list<array{value: string, label: string}>
+     */
+    private function consentSourceOptions(): array
+    {
+        return array_map(fn (ConsentSource $source) => [
+            'value' => $source->value,
+            'label' => $source->label(),
+        ], ConsentSource::cases());
     }
 
     /**

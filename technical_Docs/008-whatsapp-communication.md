@@ -206,6 +206,19 @@ Plain URLs, query strings, email addresses, line breaks, `-`/`*` bullets, number
 `contacts.whatsapp_opt_in` must be true for business-initiated template sends.  
 Meta’s messaging policies and 24-hour customer-care windows still apply at the provider; ADMAN does not replace them.
 
+### Opt-in vs broadcast opt-out (Task 035)
+
+- `whatsapp_opt_in` keeps its meaning: the customer agreed to business WhatsApp messages. It gates document sends (`WhatsAppOutboundService::requireEligibleContact`) and WhatsApp reminders (`ReminderService`). Task 035 adds evidence columns (`whatsapp_opt_in_at`, `whatsapp_opt_in_source`) but does not change the gate.
+- `whatsapp_broadcast_opt_out_at` records that the customer does not want **broadcasts**. It is read only by `BroadcastEligibilityService`. Invoices, quotes, payment acknowledgements, reminders and staff/AI replies are unaffected (covered by `tests/Feature/ContactConsentTest.php`).
+- Broadcast eligibility needs `whatsapp_opt_in` **and** a recorded `whatsapp_opt_in_at`, plus no broadcast opt-out. Pre-Task-035 opt-ins (no timestamp) are not broadcast-eligible until staff record a source.
+- Details: `002-contacts-domain.md` → Consent.
+
+### Known gap — transactional templates missing in Meta (next task)
+
+Found in Task 034, **not fixed in Task 035**. The configured template names (`adman_quote`, `adman_invoice`, `adman_invoice_reminder`, `adman_payment_ack`) do not exist as approved templates in the Meta WhatsApp Business Account. Document sends are delivered as non-template media messages, which Meta only accepts inside the 24-hour customer service window. Outside it they can fail (e.g. `131047`).
+
+The next dedicated engineering task must establish an approved transactional template path before any broadcast execution is built. Template names/IDs must come from Meta once the owner creates them; none are invented in code.
+
 ### Customer service window & staff replies (Task 032)
 
 Meta rule (Cloud API "Service messages", checked 2026-09-29): a user's message or call opens a **24-hour customer service window**, reset by each new user message; free-form (non-template) messages are allowed only while it is open, otherwise only approved templates.
@@ -242,7 +255,7 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 - Automated recurring auto-send of invoices (invoice reminders owned by Task 009)
 - Broadcast / marketing campaigns
 - Template-based re-engagement from the thread when the 24-hour window is closed (staff free-text replies exist since Task 032)
-- Broadcast / bulk WhatsApp and email messaging (separate future task: consent, recipients, templates, scheduling, rate limits, opt-out)
+- Broadcast / bulk WhatsApp and email messaging (consent foundation + eligibility exist since Task 035; recipients, templates, scheduling, rate limits and sending remain future work)
 - Delivery/read UI polish beyond status labels
 - Personal forwarding of inbound files to arbitrary admin phone numbers
 
