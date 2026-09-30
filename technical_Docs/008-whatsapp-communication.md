@@ -171,18 +171,26 @@ Guarantee: **at-least-once** processing; external exactly-once cannot be promise
 
 Templates are created and approved in Meta (WhatsApp Manager). ADMAN only consumes them (`App\Support\WhatsAppTransactionalTemplate`, `config/adman.php` → `whatsapp.templates.<key>`: `name`, `language`, `enabled`). A template is used only when **`enabled` is true and a name is set**. Enabled defaults to `false`, so a name alone (application configuration) is never treated as a Meta-approved template.
 
-### Current state (verified read-only via the Graph API, 2026-09-30; re-checked at the start of Task 037, 12:40 WAT)
+### Current state (verified read-only via the Graph API, 2026-09-30 14:24 WAT, Task 037R)
 
-| Key | Application configuration (prod `.env` name) | Meta-approved template | ADMAN enabled |
-| --- | --- | --- | --- |
-| `quote` | `adman_quote` | **none** | no |
-| `invoice` | `adman_invoice` | **none** | no |
-| `invoice_reminder` | `adman_invoice_reminder` | **none** | no |
-| `payment_acknowledgement` | `adman_payment_ack` | **none** | no |
+| Key | Prod `.env` name | Meta template (approved, Utility, `en`) | Header | Body variables in Meta | ADMAN sends | ADMAN enabled |
+| --- | --- | --- | --- | --- | --- | --- |
+| `quote` | `adman_quote` | `quote_sent` | **none** | 5: name, quote number, business name, amount, valid until | Document header + 3: name, number, link | no |
+| `invoice` | `adman_invoice` | `invoice_sent` | **none** | 5: name, invoice number, business name, amount, due date | Document header + 3: name, number, link | no |
+| `invoice_reminder` | `adman_invoice_reminder` | `invoice_reminder` | **none** | 6: name, invoice number, business name, amount, due date, status | Document header + 5: name, number, balance, due date, link | no |
+| `payment_acknowledgement` | `adman_payment_ack` | `payment_acknowledgement` | **none** | 5: name, amount, invoice number, payment reference, payment date | Document header + 3: name, number, link | no |
 
-The only template in the WhatsApp Business Account is Meta's sample `hello_world` (Utility, `en_US`, approved), which ADMAN doesn't use. None of the four exists in Meta in any state (no draft, pending or rejected entries). So today, in-window document sends work, and out-of-window sends are blocked with a clear reason.
+All four are approved in Meta, but **none is usable by ADMAN as-is**:
+- **No Document header.** They have no header component, so the PDF can't be attached, although the reminder, invoice and quote bodies say "attached". ADMAN always sends the PDF as a document header, so Meta would reject every send (`132000`, parameters do not match).
+- **Different body variables.** The count and order differ from `templateBodyParameters`, and there's no secure-link variable.
 
-Production `.env` has the four names and `WHATSAPP_TEMPLATE_LANGUAGE=en`. It has no `_ENABLED` or per-template `_LANGUAGE` keys, so all four are disabled by default. Task 037 (controlled enablement and production UAT) stopped at this prerequisite. No configuration was changed and nothing was sent.
+Task 037R therefore enabled nothing and sent no live tests. Production `.env` is unchanged: the four names and `WHATSAPP_TEMPLATE_LANGUAGE=en`, with no `_ENABLED` keys, so all four are disabled. Out-of-window sends stay blocked with a clear reason; in-window document sends work. The remaining template is `hello_world` (Meta sample, `en_US`, unused).
+
+To unblock, either:
+- the owner adds a **Document** header to each template (edit or new version) and aligns the body variables with the table below; or
+- the owner adds a **Document** header, and an engineering change maps ADMAN data to the approved variable sets per template.
+
+The header is required in both cases.
 
 ### Templates the owner needs to create (Utility)
 
@@ -285,7 +293,9 @@ Meta’s messaging policies and 24-hour customer-care windows still apply at the
 
 Found in Task 034: outside the 24-hour window, ADMAN sent plain document messages, which Meta rejects (`131047`). Task 036 fixed the application side: out-of-window sends now use an enabled, approved Utility template with the PDF header, or are blocked with a clear reason (Outbound lifecycle, Templates).
 
-**Still open, owner action (re-confirmed 2026-09-30, Task 037):** none of the four templates exist in Meta yet, so out-of-window transactional WhatsApp stays blocked until they're created, approved and enabled. Template names and IDs come from Meta; none are invented in code.
+**Update (Task 037R, 2026-09-30 14:24):** four Utility templates are now approved (`quote_sent`, `invoice_sent`, `invoice_reminder`, `payment_acknowledgement`, all `en`). They have no Document header, and their variables don't match what ADMAN sends (see Templates → Current state), so they remain disabled.
+
+**Still open, owner action (Task 037R):** out-of-window transactional WhatsApp stays blocked until templates with a Document header and matching variables are approved and enabled. Template names and IDs come from Meta; none are invented in code.
 
 ### Customer service window & staff replies (Task 032)
 

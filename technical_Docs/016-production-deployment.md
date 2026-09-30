@@ -1043,6 +1043,14 @@ Verification: `/up` and `/login` 200, `adman:production-check` and `--strict` ex
 
 Remaining owner action: create and get approval for the four Utility templates exactly as in 008 → Templates (Document header, 3 or 5 body variables, no buttons, language `en` or matching `_LANGUAGE`). Then re-run Task 037.
 
+## Task 037R — Re-run of template enablement (2026-09-30 14:24) — STOPPED AT TEMPLATE MISMATCH
+
+Read-only Graph API check: four new templates are approved in Meta, all Utility and language `en`: `quote_sent`, `invoice_sent`, `invoice_reminder` and `payment_acknowledgement`. **None has a header component** (so there's no Document header), and their body variables don't match what ADMAN sends. They use 5 or 6 variables (business name, amount, dates, status) with no secure link; ADMAN sends a PDF document header plus 3 variables, or 5 for the reminder. Every send would be rejected by Meta (`132000`), and the PDF could not be attached. This meets the stop conditions "document header unavailable" and "template variables do not match", so nothing was enabled, production `.env` is unchanged, and no live UAT was sent. Details in 008 → Templates → Current state.
+
+Production (`6bae031`, no deploy): outbound messages unchanged (43), 0 pending, 0 duplicate provider IDs, 0 `whatsapp.blocked` audits; `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, `adman:health` ok, Horizon running, scheduler timer active, failed_jobs 0, no `laravel.log` errors on 2026-09-30. No application code changed.
+
+Remaining: an approved Document header on each template, plus either template bodies aligned to ADMAN's variables or an engineering change to ADMAN's per-template variable mapping.
+
 ---
 
 ## Approval reminders (from Task 016)
