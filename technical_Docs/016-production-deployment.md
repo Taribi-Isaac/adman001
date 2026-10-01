@@ -1066,6 +1066,30 @@ Remaining owner action:
 - The other three: add a Document header and use ADMAN's variables (008 → Templates).
 - Get all four re-approved, then re-run 037R2.
 
+## Task 037R2 (continued, 2026-10-01) — quote live UAT; BLOCKED by Meta account payment method
+
+Meta at 10:26 WAT:
+- `quote_document` (new name) and `invoice_sent`: APPROVED, Utility, `en`, Document header, 3 variables, matching ADMAN;
+- `invoice_reminder` and `payment_acknowledgement`: correct structure, **PENDING**.
+
+Production config change (server `.env` only, backups in `/home/adman/.env.bak-037r2-*`, mode 600):
+- `WHATSAPP_TEMPLATE_QUOTE=quote_document`, `WHATSAPP_TEMPLATE_QUOTE_LANGUAGE=en`;
+- `WHATSAPP_TEMPLATE_QUOTE_ENABLED=true` for the test, then set back to `false`;
+- config cache rebuilt at 640, PHP-FPM reloaded, Horizon restarted.
+
+No code change, no deploy (still `6bae031`).
+
+Owner actions in the UI (audited as Super Administrator):
+- on the owner's own contact: WhatsApp opt-in turned on (also email broadcast opt-in, and reminder channel changed to "both");
+- issued test quote QT-00001;
+- one **Send on WhatsApp** with the window closed.
+
+Result: message #121 was `document_template` with `quote_document`. The parameters were correct, with the `QT-00001.pdf` header. Meta accepted it (`wamid…` recorded, `whatsapp.queued`/`whatsapp.sent` audits), then the status webhook failed it with `131042` ("account payment issue"). There was no retry and no duplicate. The WABA `health_status` confirms `can_send_message: BLOCKED`, error `141006` (payment method). The invoice template was not enabled; the reminder and payment acknowledgement templates are pending.
+
+Finding: the contact phone is stored in local format (`070…`), so ADMAN created a second WhatsApp identity, separate from the existing `234…` one. Window detection for that contact uses the wrong identity. The fix is data: store the number with the country code.
+
+Safety: no messages to customers; 0 payments; invoice balances and statuses unchanged; 0 duplicate provider IDs; no broadcast tables. Health: `/up` and `/login` 200, production-check and `--strict` exit 0, `adman:health` ok, Horizon running, scheduler active, failed_jobs 0, no `laravel.log` errors.
+
 ---
 
 ## Approval reminders (from Task 016)
