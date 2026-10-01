@@ -134,6 +134,12 @@ The decision is made when queuing and **again at send time** (`deliverDocument`)
 
 The PDF is always an attachment (document message, or template DOCUMENT header). The secure link is still created: it's stored on the message for browser use, and it's the last template body variable (link fallback).
 
+**Verified in production (Task 037R2, 2026-10-01):**
+- **Window open:** the PDF goes as a plain WhatsApp document with the existing short caption, for example `Raslordeck Limited: Invoice INV-00002 (PDF attached)`. No template is used. The caption does **not** contain the secure link; this is the original design (the caption is unchanged since the first commit), not a 037R2 regression. A new secure link is still created and stored on the message (`meta.secure_url`).
+- **Window closed:** the approved Utility template for the document is used, with the PDF as its DOCUMENT header and the secure link as the last body variable.
+
+Each send creates a new secure link for the document and invalidates the previous one (the old URL returns 404).
+
 Requires (unchanged):
 
 - Customer contact
@@ -171,31 +177,50 @@ Guarantee: **at-least-once** processing; external exactly-once cannot be promise
 
 Templates are created and approved in Meta (WhatsApp Manager). ADMAN only consumes them (`App\Support\WhatsAppTransactionalTemplate`, `config/adman.php` → `whatsapp.templates.<key>`: `name`, `language`, `enabled`). A template is used only when **`enabled` is true and a name is set**. Enabled defaults to `false`, so a name alone (application configuration) is never treated as a Meta-approved template.
 
-### Current state (Graph API, 2026-10-01 10:26 and 10:55 WAT, Task 037R2)
+### Current state (Task 037R2 closure, Graph API 2026-10-01 18:30 WAT) — all four live
 
-| Key | Meta template | Status | Language / category | Header | Body variables | Matches ADMAN | Prod `.env` | ADMAN enabled | Live UAT |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `quote` | `quote_document` | APPROVED | `en` / Utility | Document | 3: name, quote number, secure link (business name "Raslordeck Limited" is fixed text) | yes | `quote_document`, `_LANGUAGE=en` | **no** (enabled for the UAT, then disabled) | accepted by Meta, then failed: account payment method (see below) |
-| `invoice` | `invoice_sent` | APPROVED | `en` / Utility | Document | 3: name, invoice number, secure link | yes | `adman_invoice` (not switched yet) | no | not run |
-| `invoice_reminder` | `invoice_reminder` | **PENDING** | `en` / Utility | Document | 5: name, invoice number, balance, due date, secure link | yes (structure) | `adman_invoice_reminder` | no | not run |
-| `payment_acknowledgement` | `payment_acknowledgement` | **PENDING** | `en` / Utility | Document | 3: name, payment number, secure link | yes (structure) | `adman_payment_ack` | no | not run |
+| Key | Meta template | Status | Language / category | Header | Body variables | Prod `.env` name | Enabled |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `quote` | `quote_document` | APPROVED | `en` / Utility | Document | 3: name, quote number, secure link (business name is fixed text) | `quote_document` | yes |
+| `invoice` | `invoice_sent` | APPROVED | `en` / Utility | Document | 3: name, invoice number, secure link | `invoice_sent` | yes |
+| `invoice_reminder` | `invoice_reminder` | APPROVED | `en` / Utility | Document | 5: name, invoice number, balance, due date, secure link | `invoice_reminder` | yes |
+| `payment_acknowledgement` | `payment_acknowledgement` | APPROVED | `en` / Utility | Document | 3: name, payment number, secure link | `payment_acknowledgement` | yes |
 
-`quote_sent` (approved, with {{3}} as the business name) is obsolete and not used. `hello_world` is the Meta sample and is unused.
+None has buttons. Each `_LANGUAGE` is `en`. The old placeholder names (`adman_quote`, `adman_invoice`, `adman_invoice_reminder`, `adman_payment_ack`) are no longer in the production `.env` or the cached config. `quote_sent` (approved, with {{3}} as the business name) is obsolete and unused; `hello_world` is the Meta sample and unused. WABA `health_status.can_send_message` is `AVAILABLE`.
 
-**Blocker: WhatsApp account payment method.** The WABA `health_status` reports `can_send_message: BLOCKED`, error `141006`: "There is an error with the payment method. This will block business initiated conversations." Every template send is business-initiated, so none can be delivered until the owner adds a valid payment method in Meta Business Settings → WhatsApp accounts → Payment settings. In-window replies are not affected.
+### Production UAT (Task 037R2, 2026-10-01)
 
-Quote UAT (2026-10-01 10:49, sent by the owner from the quote page, QT-00001 to the owner's own number, window closed):
-- ADMAN chose `document_template` with `quote_document`/`en`;
-- parameters were [contact name, `QT-00001`, secure link], plus the `QT-00001.pdf` document header;
-- Meta accepted the send (provider ID recorded, `whatsapp.queued` and `whatsapp.sent` audits);
-- the status webhook then failed it with `131042`, shown as "WhatsApp account payment issue…";
-- one message, no retry, no duplicate.
+All sends went to the owner's own test number (contact "Taribi Isaac", identity `234…8090`), triggered by the owner from the normal ADMAN pages, one send per scenario, no retries. "Passed" means Meta reported `delivered`, the owner received the PDF as a WhatsApp document and opened it, and the secure link returned HTTP 200. Read receipts were not part of the criteria.
 
-So the template path and the failure handling are proven, but **delivery and PDF receipt are not**. The template was disabled again afterwards. In-window document sends keep working; out-of-window sends stay blocked until templates are re-enabled.
+| Scenario | Template / mode | Message | Provider status | Result |
+| --- | --- | ---: | --- | --- |
+| Quote QT-00001, window closed | `quote_document` / `document_template` | #123 | delivered | Passed |
+| Invoice INV-00002, window closed | `invoice_sent` / `document_template` | #124 | delivered | Passed |
+| Reminder INV-00002, window closed (daily `reminders:process-due` command, occurrence #3) | `invoice_reminder` / `document_template` | #125 | delivered | Passed |
+| Payment acknowledgement RCPT-00001, window closed | `payment_acknowledgement` / `document_template` | #126 | delivered | Passed |
+| Invoice INV-00002, window open | direct `document_pdf`, no template | #128 | delivered | Passed |
 
-**Data finding: local-format phone numbers.** Contact phone `0705…` (no country code) normalizes to `070…`. ADMAN created a separate WhatsApp identity for it, not the existing `234…` identity the owner messages from. Meta still delivered by adding the business country code, but ADMAN checks the 24-hour window on the wrong identity, so that contact's window always looks closed. Store WhatsApp numbers with the country code (`+234…`), as the identity rules require (see Identity normalization).
+Provider IDs (`wamid`) are stored on each message (`external_message_id`) and in the `whatsapp.sent` audit. Each send has a `whatsapp.queued` audit (staff actor, with `delivery_kind` and the template name for template sends) and a `whatsapp.sent` audit (system). The reminder was queued by the system actor.
 
-### Templates the owner needs to create (Utility)
+**Payment acknowledgement.** RCPT-00001 is a genuine ₦1,000.00 bank-transfer payment on INV-00002. The owner recorded and confirmed it through the normal payment workflow (`payment.recorded` / `payment.confirmed` audits). The acknowledgement was sent only after confirmation, from the payment page; ADMAN generated `RCPT-00001-acknowledgement.pdf` and delivered it as the template DOCUMENT header. The send did not change the payment or the invoice: INV-00002 stayed partially paid (₦57,000 total, ₦1,000 paid, ₦56,000 outstanding), with 1 payment and 3 payment claims before and after. ADMAN has no payment reversal process, so this payment stays as a real record.
+
+**In-window regression.** The owner first used **Take Over** on the conversation (so no AI reply would be sent), then sent one WhatsApp message from the test phone (inbound message #127). That opened the 24-hour window. The invoice send (#128) used `document_pdf`: the PDF as a plain document with the short caption, no template name or parameters sent. The secure link stored for that send returned HTTP 200 with the same PDF.
+
+**History during the UAT.** Messages #121 and #122 (quote, `quote_document`) were accepted by Meta and then failed with `131042`: the WhatsApp account's payment method was blocked (`health_status` error `141006`). The owner fixed the Meta payment method and the retest (#123) was delivered. #121 also went to a separate identity created from a local-format phone number (see the finding below).
+
+**Data finding: local-format phone numbers.** Contact phone `0705…` (no country code) normalizes to `070…`. ADMAN created a separate WhatsApp identity for it, not the existing `234…` identity the owner messages from. Meta still delivered by adding the business country code, but ADMAN checks the 24-hour window on the wrong identity, so that contact's window always looks closed. Store WhatsApp numbers with the country code (`+234…`), as the identity rules require (see Identity normalization). The UAT contact was corrected to `+234…`; the extra identity and its conversation remain as history.
+
+### Post-037R2 follow-up items (not implemented)
+
+- **Local phone-number normalization:** a local-format number (`070…`) creates a separate identity instead of resolving to the international `234…` identity. Worth a small, separate hardening task.
+- **In-window secure-link caption:** consider adding the secure document link to the existing in-window document caption in a future, scoped improvement.
+- **Test payment:** RCPT-00001 is a genuine confirmed ₦1,000 payment. There is no reversal workflow; leave it as is.
+- **UAT contact reminder channel:** the owner's test contact still has reminder channel `both` (WhatsApp and email).
+- **Broadcasts:** outside 037R2 (Task 038 onward).
+
+### Template reference (Utility)
+
+These are the structures the approved templates follow. Use them if a template ever needs re-creating. The suggested names were placeholders; production uses the approved names in Current state above.
 
 All four: category **Utility**, language to match `WHATSAPP_TEMPLATE_LANGUAGE` (currently `en`; if you create them as `en_US` or `en_GB`, set that value or the per-template `_LANGUAGE`). Header type **Document** (Meta asks for a sample PDF when you submit), and **no buttons**. The body must not start or end with a variable. Suggested names match the current configuration; any approved name works if the env is updated.
 
@@ -296,13 +321,7 @@ Meta’s messaging policies and 24-hour customer-care windows still apply at the
 
 Found in Task 034: outside the 24-hour window, ADMAN sent plain document messages, which Meta rejects (`131047`). Task 036 fixed the application side: out-of-window sends now use an enabled, approved Utility template with the PDF header, or are blocked with a clear reason (Outbound lifecycle, Templates).
 
-**Update (Task 037R2, 2026-10-01):** `quote_document` and `invoice_sent` are approved and match ADMAN. `invoice_reminder` and `payment_acknowledgement` match but are still pending in Meta. The live quote test showed that the WhatsApp account's payment method blocks every business-initiated (template) message (`141006` / `131042`). All four remain disabled.
-
-**Still open, owner action:**
-- fix the Meta payment method;
-- wait for the two pending approvals.
-
-Then enable and test each template live. Template names and IDs come from Meta; none are invented in code.
+**Closed (Task 037R2, 2026-10-01):** all four templates (`quote_document`, `invoice_sent`, `invoice_reminder`, `payment_acknowledgement`) are approved, enabled in production and tested live outside the window, and the in-window document path passed its regression test (Templates → Production UAT). Template names come from Meta; none are invented in code.
 
 ### Customer service window & staff replies (Task 032)
 

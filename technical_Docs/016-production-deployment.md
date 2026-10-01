@@ -18,6 +18,7 @@ Related: Task 016 architecture review; Task 011 production readiness; Task 012 s
 | AI | **OpenAI active** |
 | WhatsApp | **PRODUCTION VERIFIED** — real Meta inbound (`wamid.HBg…`) → AI → outbound with provider id + status `delivered` |
 | Business WhatsApp number | `+234 704 723 0179` (display; Raslordeck) |
+| WhatsApp transactional templates | **Live (Task 037R2, 2026-10-01)** — `quote_document`, `invoice_sent`, `invoice_reminder`, `payment_acknowledgement` approved, enabled and tested; 24-hour window handling verified |
 
 ### Task 017 security foundation (unchanged)
 
@@ -1089,6 +1090,45 @@ Result: message #121 was `document_template` with `quote_document`. The paramete
 Finding: the contact phone is stored in local format (`070…`), so ADMAN created a second WhatsApp identity, separate from the existing `234…` one. Window detection for that contact uses the wrong identity. The fix is data: store the number with the country code.
 
 Safety: no messages to customers; 0 payments; invoice balances and statuses unchanged; 0 duplicate provider IDs; no broadcast tables. Health: `/up` and `/login` 200, production-check and `--strict` exit 0, `adman:health` ok, Horizon running, scheduler active, failed_jobs 0, no `laravel.log` errors.
+
+## Task 037R2 — closure (2026-10-01) — CLOSED / PASS
+
+The owner fixed the Meta account payment method (WABA `health_status.can_send_message` is now `AVAILABLE`), and Meta approved `invoice_reminder` and `payment_acknowledgement`. Each template was then enabled on its own and tested live once with the window closed, followed by one in-window regression. All sends went to the owner's own test number and were triggered by the owner from the normal ADMAN pages (the reminder by the daily `reminders:process-due` command). Results, message IDs and details: 008 → Templates → Production UAT.
+
+| Scenario | Mode | Message | Result |
+| --- | --- | ---: | --- |
+| Quote, window closed | `quote_document` template | #123 | delivered, PDF header, link 200 |
+| Invoice, window closed | `invoice_sent` template | #124 | delivered, PDF header, link 200 |
+| Reminder, window closed | `invoice_reminder` template | #125 | delivered, PDF header, link 200 |
+| Payment acknowledgement, window closed | `payment_acknowledgement` template | #126 | delivered, PDF header, link 200 |
+| Invoice, window open (after inbound #127) | direct `document_pdf` | #128 | delivered, PDF document, link 200 |
+
+Final WhatsApp production state:
+- Meta/WABA connection and the production number are operational.
+- All four Utility templates are approved (`en`, Document header, no buttons) and enabled; the old `adman_*` placeholder names are no longer in `.env` or the cached config.
+- The 24-hour window choice works both ways: direct document inside the window, template fallback outside it.
+- Provider IDs and statuses are recorded on every message; `whatsapp.queued` / `whatsapp.sent` audits are present.
+- Secure links work, and each send rotates the link (the previous one returns 404).
+- The in-window caption has no secure link. This is existing design, not a regression (008 → Outbound lifecycle).
+
+Production configuration (server `.env` only; backups in `/home/adman/.env.bak-037r2-*`, mode 600): `WHATSAPP_TEMPLATE_<KEY>` set to the approved names, `_LANGUAGE=en` and `_ENABLED=true` for `QUOTE`, `INVOICE`, `INVOICE_REMINDER` and `PAYMENT_ACK`. After each change: config cache rebuilt (`config.php` `adman:www-data` 640, `.env` 600), PHP-FPM reloaded, Horizon restarted. No code change and no deploy: production still runs `6bae031`.
+
+Data changes during the UAT (owner actions through the UI, all audited):
+- the test contact's phone was corrected to the `+234…` format, and its reminder channel is `both`;
+- QT-00001 was issued (₦57,000);
+- a genuine ₦1,000 payment, RCPT-00001, was recorded and confirmed on INV-00002 (now partially paid, ₦56,000 outstanding). There is no reversal process, so it stays;
+- the test conversation was taken over by staff before the in-window test.
+
+Messages #121 and #122 failed with `131042` while the Meta payment method was blocked. Message #120 is the normal 07:00 scheduled overdue-reminder email for INV-00002 to the same test contact.
+
+Safety (verified 18:30 WAT):
+- 1 payment (confirmed), 3 payment claims, other invoices unchanged;
+- WhatsApp opt-in still on, no broadcast consent or opt-outs, no broadcast tables;
+- 0 duplicate provider IDs, 0 stuck messages, 0 `whatsapp.blocked` audits.
+
+Health: `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, database, Redis and queue ok, Horizon running, scheduler timer active, failed_jobs 0, no `laravel.log` errors on 2026-10-01. Local full suite on the unchanged code (`php -d memory_limit=1G vendor/bin/pest`): 291 tests, 289 passed, 0 failed, 2 skipped, 1,411 assertions; `npm run build` succeeds.
+
+Follow-up items (not implemented): local phone-number normalization; optional secure link in the in-window caption; see 008 → Post-037R2 follow-up items. Broadcasts start with Task 038.
 
 ---
 
