@@ -26,6 +26,7 @@ class UpdateBusinessSettingsRequest extends FormRequest
             'outbound_email_enabled' => ['required', 'boolean'],
             'email_reply_to' => ['nullable', 'email', 'max:255'],
             'outbound_whatsapp_enabled' => ['required', 'boolean'],
+            'broadcasts_enabled' => ['sometimes', 'boolean'],
             'phone' => ['nullable', 'string', 'max:50'],
             'website' => ['nullable', 'url', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
@@ -90,6 +91,11 @@ class UpdateBusinessSettingsRequest extends FormRequest
             'outbound_whatsapp_enabled' => $this->boolean('outbound_whatsapp_enabled'),
             'currency_code' => strtoupper((string) $this->input('currency_code', 'NGN')),
         ];
+
+        // Optional so older clients that omit it never switch broadcasts on or off by accident.
+        if ($this->exists('broadcasts_enabled')) {
+            $merged['broadcasts_enabled'] = $this->boolean('broadcasts_enabled');
+        }
 
         if ($this->filled('default_payment_term_days')) {
             $merged['default_payment_term_days'] = (int) $this->input('default_payment_term_days');

@@ -51,10 +51,13 @@ final class WhatsAppCloudApiAdapter implements WhatsAppDeliveryAdapter
             ];
         }
 
-        $components[] = [
-            'type' => 'body',
-            'parameters' => $bodyParams,
-        ];
+        // A template without body variables must not send an empty body component.
+        if ($bodyParams !== []) {
+            $components[] = [
+                'type' => 'body',
+                'parameters' => $bodyParams,
+            ];
+        }
 
         $requestBody = [
             'messaging_product' => 'whatsapp',

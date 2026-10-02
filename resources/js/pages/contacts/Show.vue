@@ -18,6 +18,7 @@ type ContactDetail = {
     phone: string | null;
     whatsapp_id: string | null;
     whatsapp_opt_in?: boolean;
+    whatsapp_broadcast_opt_in?: boolean;
     whatsapp_broadcast_opt_out?: boolean;
     email_broadcast_opt_in?: boolean;
     email_broadcast_unsubscribed?: boolean;
@@ -190,7 +191,15 @@ const formatDate = (value: string | null) =>
                     </div>
                     <div>
                         <dt class="text-muted-foreground">WhatsApp broadcasts</dt>
-                        <dd>{{ contact.whatsapp_broadcast_opt_out ? 'Opted out' : 'Not opted out' }}</dd>
+                        <dd>
+                            {{
+                                contact.whatsapp_broadcast_opt_out
+                                    ? 'Opted out'
+                                    : contact.whatsapp_broadcast_opt_in
+                                      ? 'Agreed'
+                                      : 'Not agreed'
+                            }}
+                        </dd>
                     </div>
                     <div>
                         <dt class="text-muted-foreground">Email broadcasts</dt>

@@ -24,4 +24,5 @@ require __DIR__.'/payments.php';
 require __DIR__.'/documents.php';
 require __DIR__.'/email.php';
 require __DIR__.'/whatsapp.php';
+require __DIR__.'/broadcasts.php';
 require __DIR__.'/settings.php';

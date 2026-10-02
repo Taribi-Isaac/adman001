@@ -31,6 +31,8 @@ use Illuminate\Support\Carbon;
  * @property bool $whatsapp_opt_in
  * @property Carbon|null $whatsapp_opt_in_at
  * @property ConsentSource|null $whatsapp_opt_in_source
+ * @property Carbon|null $whatsapp_broadcast_opt_in_at
+ * @property ConsentSource|null $whatsapp_broadcast_opt_in_source
  * @property Carbon|null $whatsapp_broadcast_opt_out_at
  * @property ConsentSource|null $whatsapp_broadcast_opt_out_source
  * @property Carbon|null $email_broadcast_opt_in_at
@@ -67,6 +69,8 @@ class Contact extends Model
         'whatsapp_opt_in',
         'whatsapp_opt_in_at',
         'whatsapp_opt_in_source',
+        'whatsapp_broadcast_opt_in_at',
+        'whatsapp_broadcast_opt_in_source',
         'whatsapp_broadcast_opt_out_at',
         'whatsapp_broadcast_opt_out_source',
         'email_broadcast_opt_in_at',
@@ -95,6 +99,8 @@ class Contact extends Model
             'whatsapp_opt_in' => 'boolean',
             'whatsapp_opt_in_at' => 'datetime',
             'whatsapp_opt_in_source' => ConsentSource::class,
+            'whatsapp_broadcast_opt_in_at' => 'datetime',
+            'whatsapp_broadcast_opt_in_source' => ConsentSource::class,
             'whatsapp_broadcast_opt_out_at' => 'datetime',
             'whatsapp_broadcast_opt_out_source' => ConsentSource::class,
             'email_broadcast_opt_in_at' => 'datetime',

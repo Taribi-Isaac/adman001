@@ -16,6 +16,7 @@ type Business = {
     outbound_email_enabled: boolean;
     email_reply_to: string | null;
     outbound_whatsapp_enabled: boolean;
+    broadcasts_enabled: boolean;
     phone: string | null;
     website: string | null;
     description: string | null;
@@ -75,6 +76,7 @@ const form = useForm({
     outbound_email_enabled: Boolean(props.business.outbound_email_enabled ?? true),
     email_reply_to: props.business.email_reply_to ?? '',
     outbound_whatsapp_enabled: Boolean(props.business.outbound_whatsapp_enabled ?? true),
+    broadcasts_enabled: Boolean(props.business.broadcasts_enabled ?? false),
     phone: props.business.phone ?? '',
     website: props.business.website ?? '',
     description: props.business.description ?? '',
@@ -292,6 +294,23 @@ const submit = () => {
                         <InputError :message="form.errors.outbound_whatsapp_enabled" />
                         <p class="text-xs text-muted-foreground">
                             WhatsApp Cloud API credentials stay in WHATSAPP_* environment variables.
+                        </p>
+                    </div>
+                    <div class="space-y-2 sm:col-span-2">
+                        <label class="flex items-center gap-2 text-sm">
+                            <input
+                                v-model="form.broadcasts_enabled"
+                                type="checkbox"
+                                class="rounded border-border"
+                                :disabled="!canUpdate"
+                            />
+                            Broadcasts enabled
+                        </label>
+                        <InputError :message="form.errors.broadcasts_enabled" />
+                        <p class="text-xs text-muted-foreground">
+                            Off by default. While off, no broadcast can be sent. Even when on, each
+                            broadcast is sent only to contacts with recorded broadcast consent, after
+                            an authorised person confirms it.
                         </p>
                     </div>
                     <div class="space-y-2">

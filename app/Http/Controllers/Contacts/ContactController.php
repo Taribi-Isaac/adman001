@@ -255,7 +255,7 @@ class ContactController extends Controller
         return array_map(fn (ConsentSource $source) => [
             'value' => $source->value,
             'label' => $source->label(),
-        ], ConsentSource::cases());
+        ], ConsentSource::staffSelectable());
     }
 
     /**

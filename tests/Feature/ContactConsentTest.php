@@ -144,6 +144,22 @@ class ContactConsentTest extends TestCase
         $this->assertTrue($contact->whatsapp_opt_in);
         $this->assertNotNull($contact->whatsapp_opt_in_at);
         $this->assertSame(ConsentSource::InPerson, $contact->whatsapp_opt_in_source);
+
+        // The transactional opt-in alone never allows broadcasts.
+        $result = $this->eligibility()->forWhatsApp($contact);
+        $this->assertSame([BroadcastIneligibilityReason::NoWhatsAppBroadcastOptIn], $result->reasons);
+
+        $this->actingAs($staff)
+            ->put(route('contacts.update', $contact), $this->editPayload($contact, [
+                'whatsapp_broadcast_opt_in' => true,
+                'whatsapp_broadcast_opt_in_source' => ConsentSource::WhatsApp->value,
+            ]))
+            ->assertRedirect(route('contacts.show', $contact));
+
+        $contact->refresh();
+        $this->assertNotNull($contact->whatsapp_broadcast_opt_in_at);
+        $this->assertSame(ConsentSource::WhatsApp, $contact->whatsapp_broadcast_opt_in_source);
+        $this->assertTrue($contact->whatsapp_opt_in);
         $this->assertTrue($this->eligibility()->forWhatsApp($contact)->eligible());
     }
 
@@ -184,6 +200,8 @@ class ContactConsentTest extends TestCase
             'whatsapp_opt_in' => true,
             'whatsapp_opt_in_at' => now(),
             'whatsapp_opt_in_source' => ConsentSource::Website,
+            'whatsapp_broadcast_opt_in_at' => now(),
+            'whatsapp_broadcast_opt_in_source' => ConsentSource::Website,
         ]);
         $this->assertTrue($this->eligibility()->forWhatsApp($contact)->eligible());
 
@@ -278,10 +296,25 @@ class ContactConsentTest extends TestCase
             'whatsapp_opt_in' => true,
             'whatsapp_opt_in_at' => now(),
             'whatsapp_opt_in_source' => ConsentSource::InPerson,
+            'whatsapp_broadcast_opt_in_at' => now(),
+            'whatsapp_broadcast_opt_in_source' => ConsentSource::InPerson,
         ];
 
         $contact = $this->customer($consented);
         $this->assertTrue($this->eligibility()->check($contact, CommunicationChannel::WhatsApp)->eligible());
+
+        $transactionalOnly = $this->customer([
+            'email' => 'transactional@example.com',
+            'whatsapp_id' => '2348055555555',
+            'phone' => null,
+            ...$consented,
+            'whatsapp_broadcast_opt_in_at' => null,
+            'whatsapp_broadcast_opt_in_source' => null,
+        ]);
+        $this->assertSame(
+            [BroadcastIneligibilityReason::NoWhatsAppBroadcastOptIn],
+            $this->eligibility()->forWhatsApp($transactionalOnly)->reasons,
+        );
 
         $noNumber = Contact::factory()->customer()->create([
             'email' => 'nonumber@example.com', 'phone' => null, 'whatsapp_id' => null, ...$consented,
@@ -315,7 +348,11 @@ class ContactConsentTest extends TestCase
 
     public function test_legacy_whatsapp_opt_in_without_evidence_is_not_broadcast_eligible(): void
     {
-        $legacy = $this->customer(['whatsapp_opt_in' => true]);
+        $legacy = $this->customer([
+            'whatsapp_opt_in' => true,
+            'whatsapp_broadcast_opt_in_at' => now(),
+            'whatsapp_broadcast_opt_in_source' => ConsentSource::InPerson,
+        ]);
 
         $result = $this->eligibility()->forWhatsApp($legacy);
         $this->assertFalse($result->eligible());

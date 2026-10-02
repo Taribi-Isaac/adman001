@@ -12,6 +12,9 @@ enum EmailTemplateKey: string
 
     case PaymentAcknowledgement = 'payment_acknowledgement';
 
+    /** Marketing broadcast email (Task 038): no attachment, always carries an unsubscribe link. */
+    case Broadcast = 'broadcast';
+
     public function label(): string
     {
         return match ($this) {
@@ -19,6 +22,7 @@ enum EmailTemplateKey: string
             self::Invoice => 'Invoice',
             self::InvoiceReminder => 'Invoice reminder',
             self::PaymentAcknowledgement => 'Payment acknowledgement',
+            self::Broadcast => 'Broadcast',
         };
     }
 

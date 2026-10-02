@@ -5,6 +5,7 @@ import {
     FileText,
     Files,
     LayoutDashboard,
+    Megaphone,
     MessageSquare,
     Receipt,
     RefreshCw,
@@ -34,7 +35,11 @@ const businessName = computed(
     () => page.props.business?.name ?? page.props.name ?? 'ADMAN',
 );
 
-const mainNavItems: NavItem[] = [
+const canManageBroadcasts = computed(
+    () => page.props.auth?.user?.permissions?.includes('broadcasts.manage') ?? false,
+);
+
+const baseNavItems: NavItem[] = [
     {
         title: 'Dashboard',
         href: dashboard(),
@@ -83,6 +88,23 @@ const mainNavItems: NavItem[] = [
         comingSoon: true,
     },
 ];
+
+const broadcastsNavItem: NavItem = {
+    title: 'Broadcasts',
+    href: '/broadcasts',
+    icon: Megaphone,
+};
+
+const mainNavItems = computed<NavItem[]>(() => {
+    if (!canManageBroadcasts.value) {
+        return baseNavItems;
+    }
+
+    const items = [...baseNavItems];
+    items.splice(items.length - 1, 0, broadcastsNavItem);
+
+    return items;
+});
 
 const settingsNavItems: NavItem[] = [
     {

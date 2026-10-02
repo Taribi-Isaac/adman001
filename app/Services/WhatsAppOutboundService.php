@@ -15,6 +15,8 @@ use App\Enums\PaymentStatus;
 use App\Enums\QuoteStatus;
 use App\Enums\WhatsAppTemplateKey;
 use App\Jobs\SendOutboundWhatsAppJob;
+use App\Models\Broadcast;
+use App\Models\BroadcastRecipient;
 use App\Models\Business;
 use App\Models\Contact;
 use App\Models\Conversation;
@@ -25,6 +27,7 @@ use App\Models\Payment;
 use App\Models\Quote;
 use App\Models\User;
 use App\Support\Permissions;
+use App\Support\WhatsAppBroadcastTemplate;
 use App\Support\WhatsAppDeliveryPayload;
 use App\Support\WhatsAppDeliveryResult;
 use App\Support\WhatsAppDocumentPayload;
@@ -55,12 +58,114 @@ class WhatsAppOutboundService
     /** Approved Utility template with the PDF as DOCUMENT header, used when the window is closed. */
     public const KIND_TEMPLATE = 'document_template';
 
+    /** Approved Marketing template for a broadcast recipient (Task 038). Never free-form. */
+    public const KIND_BROADCAST = 'broadcast_template';
+
     public function __construct(
         private readonly ConversationService $conversations,
         private readonly DocumentService $documents,
         private readonly WhatsAppDeliveryAdapter $delivery,
         private readonly AuditLogger $auditLogger,
+        private readonly BroadcastDeliveryGuard $broadcastGuard,
     ) {}
+
+    /**
+     * Queue one broadcast recipient's Marketing template message. Eligibility (including
+     * broadcast consent) is decided by the caller through BroadcastEligibilityService.
+     */
+    public function queueBroadcastTemplate(
+        Broadcast $broadcast,
+        BroadcastRecipient $recipient,
+        Contact $contact,
+        WhatsAppBroadcastTemplate $template,
+        User $actor,
+    ): Message {
+        $this->assertDeliveryEnabled();
+        $to = $this->requireWhatsAppRecipient($contact);
+
+        $identity = $this->conversations->findOrCreateIdentity(
+            channel: CommunicationChannel::WhatsApp,
+            externalId: $to,
+            displayName: $contact->display_name,
+            contact: $contact,
+        );
+
+        if ($identity->contact_id === null) {
+            $this->conversations->linkIdentityToContact($identity, $contact);
+            $identity->refresh();
+        } elseif ((int) $identity->contact_id !== (int) $contact->id) {
+            throw ValidationException::withMessages([
+                'whatsapp' => 'This WhatsApp identity is already linked to a different contact.',
+            ]);
+        }
+
+        if (! $identity->is_active) {
+            throw ValidationException::withMessages([
+                'whatsapp' => 'WhatsApp communication is disabled for this identity.',
+            ]);
+        }
+
+        $conversation = $this->conversations->openConversation(
+            identity: $identity,
+            mode: ConversationMode::Human,
+            subject: 'Broadcast: '.$broadcast->name,
+        );
+
+        if ($conversation->isClosed()) {
+            $conversation = $this->conversations->reopen($conversation, ConversationMode::Human);
+        }
+
+        $bodyParameters = $template->bodyParametersFor($contact->display_name);
+
+        $message = DB::transaction(function () use ($conversation, $actor, $broadcast, $recipient, $template, $to, $bodyParameters) {
+            $message = Message::query()->create([
+                'conversation_id' => $conversation->id,
+                'direction' => MessageDirection::Outbound,
+                'channel' => CommunicationChannel::WhatsApp,
+                'body' => 'Broadcast "'.$broadcast->name.'" — approved WhatsApp Marketing template '.$template->name.'.',
+                'subject' => 'Broadcast: '.$broadcast->name,
+                'template_key' => null,
+                'document_id' => null,
+                'status' => MessageStatus::Pending,
+                'actor_type' => MessageActorType::Staff,
+                'actor_user_id' => $actor->id,
+                'external_message_id' => null,
+                'occurred_at' => now(),
+                'meta' => [
+                    'to' => $to,
+                    'delivery_kind' => self::KIND_BROADCAST,
+                    'template_name' => $template->name,
+                    'template_language' => $template->language,
+                    'body_parameters' => $bodyParameters,
+                    'broadcast_id' => $broadcast->id,
+                    'broadcast_recipient_id' => $recipient->id,
+                ],
+            ]);
+
+            $conversation->last_message_at = $message->occurred_at;
+            $conversation->save();
+
+            return $message;
+        });
+
+        SendOutboundWhatsAppJob::dispatch($message->id)->afterCommit();
+
+        $this->auditLogger->record(
+            event: 'whatsapp.queued',
+            description: 'Broadcast WhatsApp Marketing template queued',
+            auditable: $message,
+            newValues: [
+                'message_id' => $message->id,
+                'to' => $to,
+                'delivery_kind' => self::KIND_BROADCAST,
+                'template_name' => $template->name,
+                'broadcast_id' => $broadcast->id,
+            ],
+            actor: $actor,
+        );
+
+        return $message;
+    }
 
     public function queueQuoteWhatsApp(Quote $quote, User $actor): Message
     {
@@ -402,6 +507,12 @@ class WhatsAppOutboundService
             ]);
         }
 
+        if (BroadcastDeliveryGuard::isBroadcastMessage($message)) {
+            throw ValidationException::withMessages([
+                'message' => 'Broadcast messages are never resent, so a failed broadcast message cannot be retried.',
+            ]);
+        }
+
         if (! $message->status->canRetryDelivery() && $message->status !== MessageStatus::Processing) {
             throw ValidationException::withMessages([
                 'message' => 'This message cannot be retried in its current state.',
@@ -512,6 +623,8 @@ class WhatsAppOutboundService
                 ));
             } elseif ($deliveryKind === self::KIND_DOCUMENT || $deliveryKind === self::KIND_TEMPLATE) {
                 $result = $this->deliverDocument($locked, $meta);
+            } elseif ($deliveryKind === self::KIND_BROADCAST) {
+                $result = $this->deliverBroadcast($locked, $meta);
             } else {
                 throw ValidationException::withMessages([
                     'whatsapp' => 'Unsupported WhatsApp delivery type for this message. Queue a new send.',
@@ -816,6 +929,54 @@ class WhatsAppOutboundService
             caption: $caption,
             messageId: $message->id,
         ));
+    }
+
+    /**
+     * Send a broadcast Marketing template (no header). Failures are never retried: a timeout
+     * may still have reached the customer, and a duplicate marketing message is worse than a gap.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    private function deliverBroadcast(Message $message, array $meta): WhatsAppDeliveryResult
+    {
+        if (! BroadcastDeliveryGuard::isBroadcastMessage($message)) {
+            throw ValidationException::withMessages([
+                'whatsapp' => 'Broadcast details are missing for this message.',
+            ]);
+        }
+
+        $blocked = $this->broadcastGuard->blockReason($message);
+        if ($blocked !== null) {
+            throw ValidationException::withMessages(['whatsapp' => $blocked]);
+        }
+
+        $to = WhatsAppPhone::normalize((string) ($meta['to'] ?? ''));
+        $templateName = trim((string) ($meta['template_name'] ?? ''));
+        $language = trim((string) ($meta['template_language'] ?? ''));
+        if ($to === null || $templateName === '' || $language === '') {
+            throw ValidationException::withMessages([
+                'whatsapp' => 'Broadcast recipient number or template is missing for this message.',
+            ]);
+        }
+
+        $params = array_map(function ($param): string {
+            $clean = trim((string) preg_replace('/\s+/u', ' ', (string) $param));
+
+            return $clean === '' ? '-' : $clean;
+        }, array_values((array) ($meta['body_parameters'] ?? [])));
+
+        $result = $this->delivery->sendTemplate(new WhatsAppDeliveryPayload(
+            to: $to,
+            templateName: $templateName,
+            languageCode: $language,
+            templateKey: null,
+            bodyParameters: $params,
+            messageId: $message->id,
+        ));
+
+        return $result->success
+            ? $result
+            : WhatsAppDeliveryResult::failed($result->failureReason ?? 'WhatsApp delivery failed.', retryable: false);
     }
 
     private function documentCaption(

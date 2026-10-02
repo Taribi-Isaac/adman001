@@ -26,6 +26,12 @@ final class ContactConsent
             'source' => 'whatsapp_opt_in_source',
             'label' => 'WhatsApp opt-in',
         ],
+        'whatsapp_broadcast_opt_in' => [
+            'channel' => CommunicationChannel::WhatsApp,
+            'at' => 'whatsapp_broadcast_opt_in_at',
+            'source' => 'whatsapp_broadcast_opt_in_source',
+            'label' => 'WhatsApp broadcast opt-in',
+        ],
         'whatsapp_broadcast_opt_out' => [
             'channel' => CommunicationChannel::WhatsApp,
             'at' => 'whatsapp_broadcast_opt_out_at',
@@ -55,7 +61,7 @@ final class ContactConsent
 
         foreach (self::FLAGS as $flag => $definition) {
             $rules[$flag] = ['sometimes', 'boolean'];
-            $rules[$definition['source']] = ['nullable', Rule::enum(ConsentSource::class)];
+            $rules[$definition['source']] = ['nullable', Rule::enum(ConsentSource::class)->only(ConsentSource::staffSelectable())];
         }
 
         return $rules;

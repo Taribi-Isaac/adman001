@@ -26,6 +26,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->validateCsrfTokens(except: [
             'webhooks/whatsapp',
+            // Signed one-click unsubscribe POSTs come from mail clients, not ADMAN forms.
+            'email/unsubscribe/*',
         ]);
 
         $middleware->web(append: [

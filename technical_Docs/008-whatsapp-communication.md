@@ -216,7 +216,7 @@ Provider IDs (`wamid`) are stored on each message (`external_message_id`) and in
 - **In-window secure-link caption:** consider adding the secure document link to the existing in-window document caption in a future, scoped improvement.
 - **Test payment:** RCPT-00001 is a genuine confirmed ₦1,000 payment. There is no reversal workflow; leave it as is.
 - **UAT contact reminder channel:** the owner's test contact still has reminder channel `both` (WhatsApp and email).
-- **Broadcasts:** outside 037R2 (Task 038 onward).
+- **Broadcasts:** implemented in Task 038 (`017-broadcasts.md`); WhatsApp broadcasts need a separate approved **Marketing** template, which does not exist yet.
 
 ### Template reference (Utility)
 
@@ -314,8 +314,12 @@ Meta’s messaging policies and 24-hour customer-care windows still apply at the
 
 - `whatsapp_opt_in` keeps its meaning: the customer agreed to business WhatsApp messages. It gates document sends (`WhatsAppOutboundService::requireEligibleContact`) and WhatsApp reminders (`ReminderService`). Task 035 adds evidence columns (`whatsapp_opt_in_at`, `whatsapp_opt_in_source`) but does not change the gate.
 - `whatsapp_broadcast_opt_out_at` records that the customer does not want **broadcasts**. It is read only by `BroadcastEligibilityService`. Invoices, quotes, payment acknowledgements, reminders and staff/AI replies are unaffected (covered by `tests/Feature/ContactConsentTest.php`).
-- Broadcast eligibility needs `whatsapp_opt_in` **and** a recorded `whatsapp_opt_in_at`, plus no broadcast opt-out. Pre-Task-035 opt-ins (no timestamp) are not broadcast-eligible until staff record a source.
+- Broadcast eligibility needs `whatsapp_opt_in` **and** a recorded `whatsapp_opt_in_at`, **plus** a separate recorded `whatsapp_broadcast_opt_in_at` (Task 038), plus no broadcast opt-out. Pre-Task-035 opt-ins (no timestamp) are not broadcast-eligible until staff record a source.
 - Details: `002-contacts-domain.md` → Consent.
+
+### Broadcast Marketing template (Task 038)
+
+WhatsApp broadcasts (`017-broadcasts.md`) send only the template in `WHATSAPP_TEMPLATE_BROADCAST*` (delivery kind `broadcast_template`, no header, body variables only if configured). It must be an approved **Marketing** template and is refused if its name matches any Utility template above; there is no fallback. Broadcast messages are never retried, and account-level template/account errors stop the broadcast. As of 2026-10-01 Meta lists no Marketing template, so WhatsApp broadcasts cannot be sent.
 
 ### Transactional templates outside the window (Task 034 finding → Task 036)
 
@@ -357,9 +361,8 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 
 - OCR / vision of inbound customer files
 - Automated recurring auto-send of invoices (invoice reminders owned by Task 009)
-- Broadcast / marketing campaigns
 - Template-based re-engagement from the conversation thread when the 24-hour window is closed (staff free-text replies exist since Task 032; transactional document templates since Task 036)
-- Broadcast / bulk WhatsApp and email messaging (consent foundation + eligibility exist since Task 035; recipients, templates, scheduling, rate limits and sending remain future work)
+- Broadcast scheduling, segmentation and campaign analytics (basic one-off broadcasts exist since Task 038, `017-broadcasts.md`)
 - Delivery/read UI polish beyond status labels
 - Personal forwarding of inbound files to arbitrary admin phone numbers
 

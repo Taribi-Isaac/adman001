@@ -43,6 +43,25 @@ final class WhatsAppErrorMapper
         };
     }
 
+    /**
+     * Whether a stored failure reason means every further send would fail too (template,
+     * account, quality or credential problems), so a broadcast must stop rather than continue.
+     */
+    public static function isAccountLevelReason(?string $reason): bool
+    {
+        if ($reason === null || $reason === '') {
+            return false;
+        }
+
+        $accountLevel = array_map(
+            fn (string $code) => (string) self::reasonForCode($code),
+            ['132001', '132000', '132015', '132016', '131042', '131031', '131048', '190'],
+        );
+        $accountLevel[] = self::reason(404, null);
+
+        return in_array($reason, $accountLevel, true);
+    }
+
     public static function retryable(int $status, ?string $code): bool
     {
         if ($code !== null && in_array($code, self::RETRYABLE_CODES, true)) {

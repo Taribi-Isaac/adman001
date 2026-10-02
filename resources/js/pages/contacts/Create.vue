@@ -35,6 +35,8 @@ const form = useForm({
     whatsapp_id: '',
     whatsapp_opt_in: false,
     whatsapp_opt_in_source: '',
+    whatsapp_broadcast_opt_in: false,
+    whatsapp_broadcast_opt_in_source: '',
     whatsapp_broadcast_opt_out: false,
     whatsapp_broadcast_opt_out_source: '',
     email_broadcast_opt_in: false,

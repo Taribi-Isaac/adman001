@@ -10,6 +10,7 @@ use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
+use Illuminate\Mail\Mailables\Headers;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Storage;
 
@@ -47,12 +48,25 @@ class DocumentOutboundMail extends Mailable
             EmailTemplateKey::Invoice => 'mail.documents.invoice',
             EmailTemplateKey::InvoiceReminder => 'mail.documents.invoice-reminder',
             EmailTemplateKey::PaymentAcknowledgement => 'mail.documents.payment-acknowledgement',
+            EmailTemplateKey::Broadcast => 'mail.broadcast',
         };
 
         return new Content(
             markdown: $view,
             with: $this->payload->viewData,
         );
+    }
+
+    public function headers(): Headers
+    {
+        if (! is_string($this->payload->unsubscribeUrl) || $this->payload->unsubscribeUrl === '') {
+            return new Headers;
+        }
+
+        return new Headers(text: [
+            'List-Unsubscribe' => '<'.$this->payload->unsubscribeUrl.'>',
+            'List-Unsubscribe-Post' => 'List-Unsubscribe=One-Click',
+        ]);
     }
 
     /**

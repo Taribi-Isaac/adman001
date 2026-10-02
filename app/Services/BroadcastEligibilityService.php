@@ -71,6 +71,11 @@ class BroadcastEligibilityService
             $reasons[] = BroadcastIneligibilityReason::WhatsAppOptInNotRecorded;
         }
 
+        // Marketing needs its own recorded consent; the transactional opt-in alone is never enough.
+        if ($contact->whatsapp_broadcast_opt_in_at === null) {
+            $reasons[] = BroadcastIneligibilityReason::NoWhatsAppBroadcastOptIn;
+        }
+
         if ($contact->whatsapp_broadcast_opt_out_at !== null) {
             $reasons[] = BroadcastIneligibilityReason::WhatsAppBroadcastOptedOut;
         }

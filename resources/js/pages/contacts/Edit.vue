@@ -56,6 +56,8 @@ const form = useForm({
     whatsapp_id: props.contact.whatsapp_id ?? '',
     whatsapp_opt_in: Boolean(props.contact.whatsapp_opt_in),
     whatsapp_opt_in_source: props.contact.whatsapp_opt_in_source ?? '',
+    whatsapp_broadcast_opt_in: Boolean(props.contact.whatsapp_broadcast_opt_in),
+    whatsapp_broadcast_opt_in_source: props.contact.whatsapp_broadcast_opt_in_source ?? '',
     whatsapp_broadcast_opt_out: Boolean(props.contact.whatsapp_broadcast_opt_out),
     whatsapp_broadcast_opt_out_source: props.contact.whatsapp_broadcast_opt_out_source ?? '',
     email_broadcast_opt_in: Boolean(props.contact.email_broadcast_opt_in),

@@ -218,7 +218,7 @@ Recorded failures include a staff-safe reason (no raw credentials). Retry uses t
 - Automated invoice reminders are owned by Task 009 (`ReminderService` → `queueInvoiceReminderEmail`); this domain still owns delivery only
 - No automatic email on recurring generation
 - No WhatsApp
-- No bulk/marketing mail. Task 035 added broadcast consent only (`email_broadcast_opt_in_at`, `email_broadcast_unsubscribed_at`, eligibility via `BroadcastEligibilityService::forEmail`). These columns are **not** read by document sending or reminders: an unsubscribed contact still receives invoice, quote, payment-acknowledgement and reminder emails. No unsubscribe endpoint, List-Unsubscribe header or Resend webhooks yet. See `002-contacts-domain.md` → Consent
+- Email broadcasts (Task 038, `017-broadcasts.md`) reuse this pipeline: `EmailOutboundService::queueBroadcastEmail` creates a normal Message (`template_key = broadcast`, no document) and `SendOutboundEmailJob` sends it through the same adapter with the `mail.broadcast` view, no attachment, a signed unsubscribe link and `List-Unsubscribe` / `List-Unsubscribe-Post` headers. Broadcast emails are never retried. Consent columns (`email_broadcast_opt_in_at`, `email_broadcast_unsubscribed_at`) are **not** read by document sending or reminders: an unsubscribed contact still receives invoice, quote, payment-acknowledgement and reminder emails, and those emails have no unsubscribe link or header. No Resend webhooks yet. See `002-contacts-domain.md` → Consent
 - Amazon SES is **not** used (Resend is the production provider)
 
 ---

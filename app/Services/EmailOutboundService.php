@@ -16,6 +16,8 @@ use App\Enums\MessageStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\QuoteStatus;
 use App\Jobs\SendOutboundEmailJob;
+use App\Models\Broadcast;
+use App\Models\BroadcastRecipient;
 use App\Models\Business;
 use App\Models\Contact;
 use App\Models\Document;
@@ -28,6 +30,7 @@ use App\Support\EmailDeliveryPayload;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -42,7 +45,110 @@ class EmailOutboundService
         private readonly DocumentService $documents,
         private readonly EmailDeliveryAdapter $delivery,
         private readonly AuditLogger $auditLogger,
+        private readonly BroadcastDeliveryGuard $broadcastGuard,
     ) {}
+
+    /**
+     * Queue one broadcast recipient's email (no attachment). Eligibility, including the
+     * email broadcast opt-in, is decided by the caller through BroadcastEligibilityService.
+     */
+    public function queueBroadcastEmail(
+        Broadcast $broadcast,
+        BroadcastRecipient $recipient,
+        Contact $contact,
+        User $actor,
+    ): Message {
+        $this->assertDeliveryEnabled();
+        $email = $this->requireValidEmail($contact);
+
+        $identity = $this->conversations->findOrCreateIdentity(
+            channel: CommunicationChannel::Email,
+            externalId: $email,
+            displayName: $contact->display_name,
+            contact: $contact,
+        );
+
+        if ($identity->contact_id === null) {
+            $this->conversations->linkIdentityToContact($identity, $contact);
+            $identity->refresh();
+        } elseif ((int) $identity->contact_id !== (int) $contact->id) {
+            throw ValidationException::withMessages([
+                'email' => 'This email identity is already linked to a different contact.',
+            ]);
+        }
+
+        if (! $identity->is_active) {
+            throw ValidationException::withMessages([
+                'email' => 'Email communication is disabled for this identity.',
+            ]);
+        }
+
+        $conversation = $this->conversations->openConversation(
+            identity: $identity,
+            mode: ConversationMode::Human,
+            subject: 'Broadcast: '.$broadcast->name,
+        );
+
+        if ($conversation->isClosed()) {
+            $conversation = $this->conversations->reopen($conversation, ConversationMode::Human);
+        }
+
+        $message = DB::transaction(function () use ($conversation, $actor, $broadcast, $recipient, $email) {
+            $message = Message::query()->create([
+                'conversation_id' => $conversation->id,
+                'direction' => MessageDirection::Outbound,
+                'channel' => CommunicationChannel::Email,
+                'body' => (string) $broadcast->body,
+                'subject' => (string) $broadcast->subject,
+                'template_key' => EmailTemplateKey::Broadcast->value,
+                'document_id' => null,
+                'status' => MessageStatus::Pending,
+                'actor_type' => MessageActorType::Staff,
+                'actor_user_id' => $actor->id,
+                'external_message_id' => null,
+                'occurred_at' => now(),
+                'meta' => [
+                    'to' => $email,
+                    'template' => EmailTemplateKey::Broadcast->value,
+                    'broadcast_id' => $broadcast->id,
+                    'broadcast_recipient_id' => $recipient->id,
+                ],
+            ]);
+
+            $conversation->last_message_at = $message->occurred_at;
+            $conversation->save();
+
+            return $message;
+        });
+
+        SendOutboundEmailJob::dispatch($message->id)->afterCommit();
+
+        $this->auditLogger->record(
+            event: 'email.queued',
+            description: 'Broadcast email queued',
+            auditable: $message,
+            newValues: [
+                'message_id' => $message->id,
+                'template' => EmailTemplateKey::Broadcast->value,
+                'to' => $email,
+                'broadcast_id' => $broadcast->id,
+            ],
+            actor: $actor,
+        );
+
+        return $message;
+    }
+
+    /**
+     * Signed, login-free link that records the contact's email broadcast unsubscribe.
+     */
+    public static function broadcastUnsubscribeUrl(int $contactId, int $broadcastId): string
+    {
+        return URL::signedRoute('broadcasts.unsubscribe', [
+            'contact' => $contactId,
+            'broadcast' => $broadcastId,
+        ]);
+    }
 
     public function queueQuoteEmail(Quote $quote, User $actor): Message
     {
@@ -151,6 +257,12 @@ class EmailOutboundService
         if ($message->status->isTerminalSuccess()) {
             throw ValidationException::withMessages([
                 'message' => 'This email was already submitted successfully. Queue a new send if another copy is required.',
+            ]);
+        }
+
+        if (BroadcastDeliveryGuard::isBroadcastMessage($message)) {
+            throw ValidationException::withMessages([
+                'message' => 'Broadcast messages are never resent, so a failed broadcast email cannot be retried.',
             ]);
         }
 
@@ -399,6 +511,10 @@ class EmailOutboundService
 
     private function buildPayload(Message $message): EmailDeliveryPayload
     {
+        if ($message->template_key === EmailTemplateKey::Broadcast->value) {
+            return $this->buildBroadcastPayload($message);
+        }
+
         $message->loadMissing(['conversation.identity', 'document.documentable']);
 
         $identity = $message->conversation?->identity;
@@ -477,6 +593,57 @@ class EmailOutboundService
             attachmentPath: $document->path,
             attachmentFilename: $document->filename,
             attachmentMime: $document->mime_type ?: 'application/pdf',
+        );
+    }
+
+    private function buildBroadcastPayload(Message $message): EmailDeliveryPayload
+    {
+        if (! BroadcastDeliveryGuard::isBroadcastMessage($message)) {
+            throw ValidationException::withMessages([
+                'email' => 'Broadcast details are missing for this email.',
+            ]);
+        }
+
+        $blocked = $this->broadcastGuard->blockReason($message);
+        if ($blocked !== null) {
+            throw ValidationException::withMessages(['email' => $blocked]);
+        }
+
+        $to = $this->normalizeEmail((string) ($message->meta['to'] ?? ''));
+        if ($to === '' || ! filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            throw ValidationException::withMessages([
+                'email' => 'Recipient email address is missing or invalid.',
+            ]);
+        }
+
+        $message->loadMissing('conversation.contact');
+        $contact = $message->conversation?->contact;
+        if ($contact === null) {
+            throw ValidationException::withMessages([
+                'email' => 'The broadcast recipient contact is missing.',
+            ]);
+        }
+
+        $unsubscribeUrl = self::broadcastUnsubscribeUrl($contact->id, (int) $message->meta['broadcast_id']);
+        [$fromAddress, $fromName, $replyTo] = $this->resolveSender();
+
+        return new EmailDeliveryPayload(
+            toAddress: $to,
+            toName: $contact->display_name,
+            subject: (string) $message->subject,
+            templateKey: EmailTemplateKey::Broadcast,
+            viewData: [
+                'business_name' => Business::current()->name,
+                'customer_name' => $contact->display_name,
+                'subject' => (string) $message->subject,
+                'body' => (string) $message->body,
+                'unsubscribe_url' => $unsubscribeUrl,
+            ],
+            fromAddress: $fromAddress,
+            fromName: $fromName,
+            replyTo: $replyTo,
+            messageId: $message->id,
+            unsubscribeUrl: $unsubscribeUrl,
         );
     }
 

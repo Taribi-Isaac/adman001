@@ -139,6 +139,10 @@ final class Permissions
 
     public const ATTACHMENTS_REVIEW = 'attachments.review';
 
+    public const BROADCASTS_MANAGE = 'broadcasts.manage';
+
+    public const BROADCASTS_SEND = 'broadcasts.send';
+
     /**
      * @return list<string>
      */
@@ -210,6 +214,8 @@ final class Permissions
             self::BUSINESS_KNOWLEDGE_MANAGE,
             self::ATTACHMENTS_VIEW,
             self::ATTACHMENTS_REVIEW,
+            self::BROADCASTS_MANAGE,
+            self::BROADCASTS_SEND,
         ];
     }
 
@@ -252,6 +258,10 @@ final class Permissions
                 self::MESSAGES_RETRY => 'Retry failed external message delivery',
                 self::ATTACHMENTS_VIEW => 'View inbound attachments',
                 self::ATTACHMENTS_REVIEW => 'Review inbound attachments',
+            ],
+            'Broadcasts' => [
+                self::BROADCASTS_MANAGE => 'Create, view and cancel broadcasts',
+                self::BROADCASTS_SEND => 'Start sending a broadcast',
             ],
             'Quotes' => [
                 self::QUOTES_VIEW => 'View quotes',

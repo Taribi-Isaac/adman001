@@ -1,0 +1,196 @@
+# ADMAN Technical Documentation — Broadcasts (Task 038)
+
+## Purpose
+
+A small, controlled way to send one message to customers who **explicitly agreed** to receive broadcasts, on one channel:
+
+- **WhatsApp:** only an approved Meta **Marketing** template. Never free-form text, never a transactional Utility template.
+- **Email:** subject + plain-text body through the existing queued email pipeline (Resend in production). No attachments.
+
+There is no scheduling, segmentation, A/B testing, analytics, or automation. Each broadcast is a one-off that an authorised person reviews and sends by hand.
+
+## Production state (2026-10-01)
+
+| Gate | State |
+| --- | --- |
+| `businesses.broadcasts_enabled` | **false** (default; nothing can be sent) |
+| Approved Meta Marketing template | **none** (Meta lists 6 templates, all `UTILITY`; read-only check 2026-10-01) |
+| `WHATSAPP_TEMPLATE_BROADCAST*` env | unset (WhatsApp broadcasts refused with an explanation) |
+| Contacts with WhatsApp broadcast opt-in | 0 (new column; nobody starts opted in) |
+| Contacts with email broadcast opt-in | 0 |
+
+So today no broadcast can reach anyone. Email broadcasts need the switch **and** recorded opt-ins; WhatsApp broadcasts additionally need an approved Marketing template.
+
+## Architecture
+
+```
+Broadcast (draft) ──preview──▶ BroadcastEligibilityService (per contact)
+     │ owner clicks "Send to N" (broadcasts.send, confirms N)
+     ▼
+BroadcastService::start ── row lock, all gates re-checked, snapshot ──▶ broadcast_recipients (pending)
+     │ dispatch ProcessBroadcastJob (after commit)
+     ▼
+ProcessBroadcastJob ── batch of 20, then re-dispatch after 10 s ──▶ per recipient (row lock):
+     re-check eligibility ─▶ skipped
+     WhatsAppOutboundService::queueBroadcastTemplate / EmailOutboundService::queueBroadcastEmail
+          └─ normal Message + SendOutbound*Job (existing pipeline, Horizon)
+               └─ BroadcastDeliveryGuard (last-moment check) ─▶ provider
+Message status changes (send result, Meta status webhooks) ──MessageObserver──▶ BroadcastService::syncRecipientFromMessage
+     └─ finalizeIfDone ─▶ completed / failed
+```
+
+No second messaging system: every broadcast message is an ordinary `Message` in a normal conversation (Human mode, subject `Broadcast: <name>`), so it appears in the conversation history and uses the existing jobs, adapters, retries policy and audit events (`whatsapp.queued/sent/failed`, `email.queued/sent/failed`).
+
+### Key classes
+
+- `App\Models\Broadcast`, `App\Models\BroadcastRecipient`
+- `App\Enums\BroadcastStatus`, `BroadcastRecipientStatus`, `BroadcastAudience`
+- `App\Services\BroadcastService` — create/update draft, `preview`, `start`, `processNextBatch`, `cancel`, `stop`, `syncRecipientFromMessage`, `finalizeIfDone`, `counts`
+- `App\Services\BroadcastDeliveryGuard` — final check before the provider call
+- `App\Services\BroadcastEligibilityService` — single source of truth for who may receive a broadcast (Task 035, extended)
+- `App\Jobs\ProcessBroadcastJob` (`ShouldBeUniqueUntilProcessing`, 3 tries, `failed()` stops the broadcast)
+- `App\Observers\MessageObserver` (registered on `Message` via `#[ObservedBy]`, runs after commit)
+- `App\Support\WhatsAppBroadcastTemplate` — reads and validates the Marketing template config
+- `App\Http\Controllers\Broadcasts\BroadcastController`, `BroadcastUnsubscribeController`, `routes/broadcasts.php`
+- Vue: `pages/broadcasts/Index|Create|Edit|Show.vue`, `components/broadcasts/BroadcastForm.vue`
+
+### Data model
+
+`broadcasts`: name, channel, audience_type, selected_contact_ids (json), subject/body (email), whatsapp_template_name/language (snapshot at start), status, recipient_limit / recipient_count / exclusion_summary (snapshot at start), failure_reason, created_by / sent_by / cancelled_by, send_requested_at / started_at / completed_at / cancelled_at / failed_at.
+
+`broadcast_recipients`: broadcast_id, contact_id, communication_identity_id, channel, address, status, message_id (**unique**), provider_message_id, failure_reason, queued/sent/delivered/failed timestamps. **Unique (broadcast_id, contact_id).**
+
+`businesses.broadcasts_enabled` (bool, default false). `contacts.whatsapp_broadcast_opt_in_at` / `_source` (nullable).
+
+## Statuses
+
+Broadcast: `draft` → `queued` (send requested, recipients snapshotted) → `sending` (first batch picked up) → `completed`, or `failed` (stopped, or nobody could be sent), or `cancelled` (from draft, queued or sending).
+
+Recipient: `pending` (snapshotted) → `queued` (Message created) → `sent` (provider accepted) → `delivered` (Meta status webhook delivered/read). Also `failed`, `skipped` (no longer eligible when its turn came) and `cancelled` (broadcast cancelled or stopped first). "Sent" counts include delivered.
+
+## Audiences
+
+| Audience | Candidates | Statuses passed to eligibility |
+| --- | --- | --- |
+| Customers | all contacts with status Customer (incl. archived) | Customer |
+| Customers + Prospects | status Customer or Prospect | Customer, Prospect |
+| Selected contacts | the chosen IDs (max 500 in validation) | Customer, Prospect |
+
+Archived and Unknown contacts are never sent to: they are excluded by eligibility (`archived`, `status_not_in_audience`) and show up in the exclusion counts. The selection list in the UI only offers active Customers and Prospects.
+
+## Consent
+
+Eligibility (`BroadcastEligibilityService`), checked three times: preview, when the recipient is queued, and right before the provider call.
+
+- **WhatsApp:** not archived; status in audience; WhatsApp enabled (config + business); valid number; identity active and not linked to another contact; `whatsapp_opt_in` **with** recorded evidence; **`whatsapp_broadcast_opt_in_at` recorded (new in Task 038)**; no `whatsapp_broadcast_opt_out_at`. The transactional opt-in alone is never enough.
+- **Email:** not archived; status in audience; email enabled; valid address; `email_broadcast_opt_in_at` recorded; not unsubscribed.
+
+Staff record the WhatsApp broadcast opt-in on the contact form ("Customer agreed to receive WhatsApp broadcasts", with a source). The `unsubscribe_link` source cannot be chosen by staff; only the system sets it. Existing contacts were not opted in by the migration and must not be opted in just to test.
+
+Consent snapshot: `start()` stores the eligible contacts as recipients plus an exclusion summary by reason. A later opt-out still wins: the recipient becomes `skipped` and nothing is sent.
+
+## Sending gates (all server-side, in `start()`, under a row lock)
+
+1. User has `broadcasts.send` (403 otherwise; route middleware + service check).
+2. Broadcast is still a draft (so it cannot be sent twice).
+3. `businesses.broadcasts_enabled` is true.
+4. WhatsApp: a valid Marketing template is configured (see below). Email: subject and body present, sender address configured.
+5. At least one eligible recipient.
+6. Eligible count ≤ recipient limit. Otherwise refused outright: no recipients, no messages, no partial send.
+7. Eligible count equals the count the user confirmed on the review screen (`confirm_recipient_count`); if the audience changed, the user must review again.
+
+Creating or editing a draft never sends anything.
+
+## Recipient limit
+
+`adman.broadcasts.recipient_limit` (`BROADCAST_RECIPIENT_LIMIT`, default 500). `BroadcastService::recipientLimit()` clamps it to 1–500, so configuration can lower but never raise the hard limit. There is no bypass.
+
+## Queue processing
+
+- `ProcessBroadcastJob` handles `adman.broadcasts.batch_size` recipients (default 20), then re-dispatches itself after `batch_delay_seconds` (default 10). A 500-recipient broadcast takes roughly 4–5 minutes and never monopolises the single Horizon worker; transactional jobs interleave.
+- Dispatches use `->afterCommit()` (the queue connection has `after_commit = false`).
+- If the job fails 3 times, `failed()` stops the broadcast (`failed`, pending recipients cancelled).
+
+## Idempotency (MySQL is the source of truth)
+
+- One recipient row per (broadcast, contact) — unique index.
+- A recipient is claimed with `SELECT … FOR UPDATE` and must be `pending`; it moves to `queued` together with its single Message in the same transaction. Re-running the job finds nothing pending.
+- `broadcast_recipients.message_id` is unique.
+- `BroadcastDeliveryGuard` allows the provider call only when the recipient is exactly `queued` and the message is that recipient's message.
+- Broadcast messages are **never resent**: provider failures are recorded as non-retryable, staff retry is refused (`retry()` on both services), and a job retry after an unexpected error is blocked by the guard. A provider timeout may still have delivered, and a duplicate marketing message is worse than a gap.
+
+Redis/Horizon uniqueness locks are only an optimisation.
+
+## Failure handling
+
+- One recipient failing (no WhatsApp account, opt-out at Meta, invalid email, provider rejection) marks that recipient `failed` and the broadcast continues.
+- **Account-level** WhatsApp failures stop the whole broadcast (`WhatsAppErrorMapper::isAccountLevelReason`): template missing (132001), parameter mismatch (132000/132012), template paused/disabled (132015/132016), payment issue (131042), account locked (131031/368), quality restriction (131048), authentication (190/401/403), phone number config (404). The broadcast becomes `failed`, remaining pending recipients are `cancelled`, and messages already sent stay recorded.
+- Changing or disabling the template config mid-broadcast stops it at the next batch.
+- If every attempted recipient failed and none were sent, the broadcast ends `failed`.
+
+## Cancellation
+
+`broadcasts.manage` users can cancel a draft, queued or sending broadcast. Pending recipients become `cancelled`; already-queued messages are blocked by the guard; sent messages stay recorded. Audited (`broadcast.cancelled`, with the number of recipients cancelled). Completed, failed or cancelled broadcasts cannot be cancelled.
+
+## WhatsApp Marketing template requirement
+
+```
+WHATSAPP_TEMPLATE_BROADCAST=<exact approved template name>
+WHATSAPP_TEMPLATE_BROADCAST_LANGUAGE=<exact language code, e.g. en>
+WHATSAPP_TEMPLATE_BROADCAST_ENABLED=true
+WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS=        # empty = no variables, or: contact_name
+```
+
+`WhatsAppBroadcastTemplate::configured()` returns null (and `problem()` explains why) when disabled, no name, the name equals any configured transactional template (`quote_document`, `invoice_sent`, `invoice_reminder`, `payment_acknowledgement`, case-insensitive), or a parameter other than `contact_name` is listed. There is no fallback to a Utility template.
+
+ADMAN cannot read the template category at send time; setting `ENABLED=true` is the operator's statement that WhatsApp Manager shows the template as **Approved** with category **Marketing**. Never set it for a template that is pending, rejected, or Utility.
+
+The send has no header and, when `PARAMETERS` is empty, no body component (adapter change: the body component is now only sent when there are parameters; transactional templates always have parameters, so they are unchanged). WhatsApp Marketing messages are charged per message by Meta and may be limited per customer (131049).
+
+## Email unsubscribe
+
+- Every broadcast email has a signed, login-free link: `GET /email/unsubscribe/{contact}/{broadcast}?signature=…` (`URL::signedRoute('broadcasts.unsubscribe')`). It shows a confirmation page; the button POSTs to the same signed URL.
+- POST records `email_broadcast_unsubscribed_at = now()` and source `unsubscribe_link` (idempotent), audited as `contact.consent_changed` with `broadcast_id` in meta.
+- Headers: `List-Unsubscribe: <signed URL>` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058). The path is exempt from CSRF because mail clients POST without a session; the signature protects it. Throttled to 30/min.
+- Unsubscribing only stops broadcasts. Quotes, invoices, reminders and receipts are unaffected; transactional emails have no unsubscribe link or header (unchanged).
+
+## Permissions
+
+| Permission | Allows |
+| --- | --- |
+| `broadcasts.manage` | List, create, edit drafts, view results, cancel |
+| `broadcasts.send` | Start sending (also needs `manage` to reach the page) |
+
+Created by migration `2026_10_02_120000_add_broadcast_permissions` and granted to Super Administrator (who also bypasses checks via `Gate::before`). The Staff role does **not** get them. Grant `broadcasts.send` to anyone else only deliberately. The sidebar entry appears only with `broadcasts.manage`.
+
+## Audit events
+
+`broadcast.created`, `broadcast.updated`, `broadcast.send_requested`, `broadcast.started`, `broadcast.recipient_queued`, `broadcast.recipient_sent`, `broadcast.recipient_failed`, `broadcast.cancelled`, `broadcast.completed`, `broadcast.failed`. Per-recipient events are one per recipient per transition (at most about 3 per recipient), never per batch tick or status poll; skipped recipients are not individually audited (the reason is on the recipient row).
+
+## Financial isolation
+
+Broadcasts never read or write invoices, payments, claims, quotes, reminder rules or occurrences (covered by `test_broadcasts_do_not_touch_financial_or_reminder_records`). Transactional WhatsApp/email behaviour, the 24-hour window logic, reminders and AI handoff are unchanged.
+
+## Enablement procedure (owner)
+
+1. **Meta:** in WhatsApp Manager create a template with category **Marketing** and the exact wording. Wait for **Approved**. Do not reuse a Utility template.
+2. **Server env:** set the four `WHATSAPP_TEMPLATE_BROADCAST*` values (exact name and language from Meta), then deploy or `php artisan config:cache` and restart Horizon through the normal process.
+3. **Consent:** for each customer who explicitly agreed, record the WhatsApp broadcast opt-in and/or email broadcast opt-in on the contact with the real source. Never bulk-opt-in.
+4. **Switch:** Business settings → tick "Broadcasts enabled".
+5. **Send:** Broadcasts → New → save draft → review the counts, exclusions, template/subject and message → tick the confirmation → "Send to N".
+6. Watch the detail page (Refresh progress). Untick "Broadcasts enabled" afterwards if broadcasts should stay off.
+
+## UAT procedure (when the prerequisites exist)
+
+1. Use only the owner's own contact(s), with genuine broadcast consent recorded by the owner.
+2. Email: create a "Selected contacts" broadcast with only the owner's contact; confirm count 1; send. Expect the email (no attachment) with an unsubscribe link and the recipient row `Sent`. Click unsubscribe → confirmation page → contact shows "Unsubscribed"; a new draft shows 0 eligible.
+3. WhatsApp (only after a Marketing template is Approved and configured): same with the owner's WhatsApp contact; expect the template on the phone, recipient `Sent` then `Delivered`, and a `wamid` stored.
+4. Check no customer conversation besides the owner's received anything, and invoices/payments are unchanged.
+
+## Limitations / deferred
+
+- No scheduling, segmentation beyond the three audiences, templates with header media or buttons, per-recipient variables beyond `contact_name`, or resend of failed recipients.
+- WhatsApp template category/approval is not verified via the API at send time (operator assertion).
+- Email delivery status beyond "accepted by provider" (no Resend webhooks), so email recipients stop at `Sent`.
+- No automatic opt-out from WhatsApp replies such as "STOP"; staff record opt-outs on the contact.
+- Unsubscribe link targets a contact, so contacts sharing one address are unsubscribed individually.

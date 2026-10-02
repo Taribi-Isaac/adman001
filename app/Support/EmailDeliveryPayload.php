@@ -23,6 +23,7 @@ final class EmailDeliveryPayload
         public readonly ?string $attachmentPath = null,
         public readonly ?string $attachmentFilename = null,
         public readonly string $attachmentMime = 'application/pdf',
+        public readonly ?string $unsubscribeUrl = null,
     ) {}
 
     public function hasAttachment(): bool

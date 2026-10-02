@@ -55,16 +55,17 @@ Indexed for status, type, display_name, email, phone, whatsapp_id, archived_at.
 
 ## Consent (Task 035)
 
-Foundation for future broadcasts only. No broadcast engine, recipient selection, template sending, unsubscribe endpoint or provider webhooks exist yet.
+Consent used by broadcasts (Task 038, see `017-broadcasts.md`). Transactional sends only use `whatsapp_opt_in`.
 
 | Flag (form field) | Stored as | Meaning |
 | --- | --- | --- |
-| `whatsapp_opt_in` | `whatsapp_opt_in` (bool) + `whatsapp_opt_in_at` / `whatsapp_opt_in_source` | Customer agreed to business WhatsApp messages. Unchanged meaning: still the gate for WhatsApp document sends and WhatsApp reminders |
+| `whatsapp_opt_in` | `whatsapp_opt_in` (bool) + `whatsapp_opt_in_at` / `whatsapp_opt_in_source` | Customer agreed to business WhatsApp messages. Unchanged meaning: still the gate for WhatsApp document sends and WhatsApp reminders. Not sufficient for broadcasts |
+| `whatsapp_broadcast_opt_in` (Task 038) | `whatsapp_broadcast_opt_in_at` / `_source` | Customer explicitly agreed to WhatsApp broadcasts (marketing). Required for WhatsApp broadcasts; never read by transactional sends |
 | `whatsapp_broadcast_opt_out` | `whatsapp_broadcast_opt_out_at` / `_source` | Customer does not want WhatsApp broadcasts. Broadcast-only; never blocks transactional sends |
 | `email_broadcast_opt_in` | `email_broadcast_opt_in_at` / `_source` | Explicit opt-in to email broadcasts |
 | `email_broadcast_unsubscribed` | `email_broadcast_unsubscribed_at` / `email_broadcast_unsubscribe_source` | Unsubscribed from email broadcasts. Broadcast-only; never blocks invoice/quote/payment/reminder emails |
 
-Sources (`App\Enums\ConsentSource`): `in_person`, `website`, `whatsapp`, `phone`, `staff_recorded`, `other`. A source is evidence of how consent was recorded, **not** proof of legal consent.
+Sources (`App\Enums\ConsentSource`): `in_person`, `website`, `whatsapp`, `phone`, `staff_recorded`, `other`, plus `unsubscribe_link` (system-only: set when a recipient uses the email unsubscribe link; staff cannot choose it, `ConsentSource::staffSelectable()`). A source is evidence of how consent was recorded, **not** proof of legal consent.
 
 Rules (`ContactService::applyConsent`, definitions in `App\Support\ContactConsent`):
 
@@ -73,13 +74,13 @@ Rules (`ContactService::applyConsent`, definitions in `App\Support\ContactConsen
 - Saving an already-on flag without a source changes nothing. Supplying a new source updates it; for a legacy `whatsapp_opt_in = true` row with no timestamp, supplying a source stamps `whatsapp_opt_in_at` (evidence recorded now).
 - Permission: `contacts.update`, enforced server-side. Creating a contact with any consent flag on also requires `contacts.update` (403 otherwise).
 
-Existing data: the migration adds nullable columns only. No contact is opted in, `whatsapp_opt_in` values are unchanged, and `down()` drops the columns.
+Existing data: the migrations add nullable columns only (Task 035, and `2026_10_02_100000_add_whatsapp_broadcast_opt_in_to_contacts` in Task 038). No contact is opted in, `whatsapp_opt_in` values are unchanged, and `down()` drops the columns.
 
 ### Broadcast eligibility
 
 `App\Services\BroadcastEligibilityService` returns a `BroadcastEligibilityResult` (all failing `BroadcastIneligibilityReason`s, not just the first). Audience statuses are a parameter (default `[Customer]`; `Unknown` is rejected).
 
-- **WhatsApp** (`forWhatsApp`): not archived; status in audience; `adman.whatsapp.enabled` + `outbound_whatsapp_enabled`; a normalizable WhatsApp number (`whatsapp_id`, else `phone`); any existing WhatsApp `CommunicationIdentity` for that number is active and not linked to another contact; `whatsapp_opt_in` true **with** `whatsapp_opt_in_at` recorded; no broadcast opt-out.
+- **WhatsApp** (`forWhatsApp`): not archived; status in audience; `adman.whatsapp.enabled` + `outbound_whatsapp_enabled`; a normalizable WhatsApp number (`whatsapp_id`, else `phone`); any existing WhatsApp `CommunicationIdentity` for that number is active and not linked to another contact; `whatsapp_opt_in` true **with** `whatsapp_opt_in_at` recorded; `whatsapp_broadcast_opt_in_at` recorded (Task 038; reason `no_whatsapp_broadcast_opt_in`); no broadcast opt-out.
 - **Email** (`forEmail`): not archived; status in audience; `adman.email.enabled` + `outbound_email_enabled`; valid email; `email_broadcast_opt_in_at` set; not unsubscribed.
 
 Legacy `whatsapp_opt_in = true` contacts without a recorded timestamp are **not** broadcast-eligible (`whatsapp_opt_in_not_recorded`) until staff record a source. They remain valid for transactional WhatsApp.

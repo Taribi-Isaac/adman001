@@ -55,6 +55,31 @@ return [
                 'enabled' => (bool) env('WHATSAPP_TEMPLATE_PAYMENT_ACK_ENABLED', false),
             ],
         ],
+        // Approved Meta *Marketing* template for broadcasts (Task 038). Kept apart from the
+        // transactional Utility templates above; it must never be one of them. `parameters`
+        // lists the body variables in order: empty (none) or `contact_name`.
+        'broadcast_template' => [
+            'name' => env('WHATSAPP_TEMPLATE_BROADCAST'),
+            'language' => env('WHATSAPP_TEMPLATE_BROADCAST_LANGUAGE'),
+            'enabled' => (bool) env('WHATSAPP_TEMPLATE_BROADCAST_ENABLED', false),
+            'parameters' => env('WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS', ''),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Broadcasts (Task 038)
+    |--------------------------------------------------------------------------
+    |
+    | Sending is also gated by Business.broadcasts_enabled (default off). The
+    | recipient limit can be lowered here but never raised above 500 in code.
+    |
+    */
+
+    'broadcasts' => [
+        'recipient_limit' => (int) env('BROADCAST_RECIPIENT_LIMIT', 500),
+        'batch_size' => (int) env('BROADCAST_BATCH_SIZE', 20),
+        'batch_delay_seconds' => (int) env('BROADCAST_BATCH_DELAY_SECONDS', 10),
     ],
 
     /*

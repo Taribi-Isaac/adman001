@@ -17,6 +17,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $email_reply_to
  * @property bool $outbound_whatsapp_enabled
  * @property bool $invoice_reminders_enabled
+ * @property bool $broadcasts_enabled
  * @property bool $ai_enabled
  * @property bool $ai_customer_responses_enabled
  * @property string|null $phone
@@ -63,6 +64,7 @@ class Business extends Model
         'email_reply_to',
         'outbound_whatsapp_enabled',
         'invoice_reminders_enabled',
+        'broadcasts_enabled',
         'ai_enabled',
         'ai_customer_responses_enabled',
         'phone',
@@ -107,6 +109,7 @@ class Business extends Model
             'outbound_email_enabled' => 'boolean',
             'outbound_whatsapp_enabled' => 'boolean',
             'invoice_reminders_enabled' => 'boolean',
+            'broadcasts_enabled' => 'boolean',
             'ai_enabled' => 'boolean',
             'ai_customer_responses_enabled' => 'boolean',
             'tax_rate' => 'decimal:4',

@@ -15,6 +15,9 @@ enum ConsentSource: string
     case StaffRecorded = 'staff_recorded';
     case Other = 'other';
 
+    /** Set by the system when a recipient uses the unsubscribe link in a broadcast email. */
+    case UnsubscribeLink = 'unsubscribe_link';
+
     public function label(): string
     {
         return match ($this) {
@@ -24,7 +27,18 @@ enum ConsentSource: string
             self::Phone => 'Phone',
             self::StaffRecorded => 'Recorded by staff',
             self::Other => 'Other',
+            self::UnsubscribeLink => 'Email unsubscribe link',
         };
+    }
+
+    /**
+     * Sources staff may choose when recording consent by hand.
+     *
+     * @return list<self>
+     */
+    public static function staffSelectable(): array
+    {
+        return array_values(array_filter(self::cases(), fn (self $source) => $source !== self::UnsubscribeLink));
     }
 
     /**

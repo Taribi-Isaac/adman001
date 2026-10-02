@@ -208,7 +208,7 @@ This domain does **not** include:
 | Email provider transport details | [007 — Email delivery](007-email-delivery.md) (Laravel Mail adapter) |
 | Inbound email sync | Future |
 | AI responses / agents / tools | AI task |
-| Automated reminders / broadcasts | Automation / later product tasks |
+| Automated reminders / broadcasts | Reminders: `009-invoice-reminders.md`. Broadcasts (Task 038): `017-broadcasts.md` — each broadcast message is a normal outbound `Message` in a Human-mode conversation (subject `Broadcast: <name>`, `meta.broadcast_id` / `broadcast_recipient_id`); `MessageObserver` mirrors its status onto `broadcast_recipients` |
 | Fake delivery simulation | Never — only real provider results |
 
 ## UI notes
