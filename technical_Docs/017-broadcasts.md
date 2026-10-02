@@ -9,17 +9,17 @@ A small, controlled way to send one message to customers who **explicitly agreed
 
 There is no scheduling, segmentation, A/B testing, analytics, or automation. Each broadcast is a one-off that an authorised person reviews and sends by hand.
 
-## Production state (2026-10-01)
+## Production state (2026-10-02, after Task 041)
 
 | Gate | State |
 | --- | --- |
-| `businesses.broadcasts_enabled` | **false** (default; nothing can be sent) |
-| Approved Meta Marketing template | **none** (Meta lists 6 templates, all `UTILITY`; read-only check 2026-10-01) |
-| `WHATSAPP_TEMPLATE_BROADCAST*` env | unset (WhatsApp broadcasts refused with an explanation) |
-| Contacts with WhatsApp broadcast opt-in | 0 (new column; nobody starts opted in) |
-| Contacts with email broadcast opt-in | 0 |
+| `businesses.broadcasts_enabled` | **false**. It was on for under a second for the Task 041 UAT, then returned to off. Both changes are audited as `business.settings_updated`. |
+| Approved Meta Marketing template | `broadcast_test`: MARKETING, APPROVED, `en` (see Production Marketing template) |
+| `WHATSAPP_TEMPLATE_BROADCAST*` env | `broadcast_test` / `en` / enabled / `contact_name` (set 2026-10-02) |
+| Contacts with WhatsApp broadcast opt-in | 1: the owner's test contact, recorded by staff on 2026-10-02 |
+| Contacts with email broadcast opt-in | 1: the same contact, recorded by staff on 2026-10-02 |
 
-So today no broadcast can reach anyone. Email broadcasts need the switch **and** recorded opt-ins; WhatsApp broadcasts additionally need an approved Marketing template.
+Nothing is sent while the switch is off. With the switch on, only contacts with recorded opt-ins are eligible.
 
 ## Architecture
 
@@ -147,6 +147,57 @@ ADMAN cannot read the template category at send time; setting `ENABLED=true` is 
 
 The send has no header and, when `PARAMETERS` is empty, no body component (adapter change: the body component is now only sent when there are parameters; transactional templates always have parameters, so they are unchanged). WhatsApp Marketing messages are charged per message by Meta and may be limited per customer (131049).
 
+### Production Marketing template (Task 041)
+
+Read-only Meta check on 2026-10-02 (HTTP 200): `broadcast_test` is the only MARKETING template.
+
+| Property | Value |
+| --- | --- |
+| Name | `broadcast_test` |
+| Category / status | MARKETING / APPROVED (`rejected_reason: NONE`) |
+| Language | `en` |
+| Components | BODY only: no header, footer or buttons |
+| Variables | exactly one, `{{1}}` = contact name (ADMAN parameter `contact_name`, filled from `Contact.display_name`) |
+
+Body text:
+
+```
+Hello {{1}},
+
+This is a test broadcast message from Raslordeck Limited.
+
+No action is required. This message is being sent as part of a controlled WhatsApp broadcast test.
+```
+
+Production configuration (server `.env` only, backup `/home/adman/.env.bak-041-*`, mode 600):
+
+```
+WHATSAPP_TEMPLATE_BROADCAST=broadcast_test
+WHATSAPP_TEMPLATE_BROADCAST_LANGUAGE=en
+WHATSAPP_TEMPLATE_BROADCAST_ENABLED=true
+WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS=contact_name
+```
+
+After the change: config cache rebuilt (`adman:www-data` 640), PHP-FPM reloaded, Horizon restarted. `WhatsAppBroadcastTemplate::problem()` returns null. The transactional templates are unchanged.
+
+`broadcast_test` is a test template. For real campaigns, create and approve a properly worded Marketing template and change these values.
+
+### Production UAT (Task 041) — PASS
+
+Broadcast #1, "Task 041 WhatsApp broadcast UAT":
+- WhatsApp, Selected contacts, the owner's test contact only.
+- Preview: 1 eligible, 0 excluded, template `broadcast_test` / `en`. Sent by the owner account through `BroadcastService` (the same path as the Send button).
+
+| Item | Result |
+| --- | --- |
+| Broadcast | `completed`: send requested 15:43:38, started 15:43:40, completed 15:43:42 WAT. Snapshot `broadcast_test` / `en`, 1 recipient. |
+| Recipient #1 | contact #2, identity #7 (canonical), `delivered`: queued 15:43:41, sent 15:43:42, delivered 15:43:50 |
+| Message #129 | outbound, `delivery_kind = broadcast_template`, `template_name = broadcast_test`, `template_language = en`, body parameter = the contact's display name. One wamid stored. Status `delivered`. |
+| Audits | `broadcast.created`, `send_requested`, `started`, `recipient_queued`, `recipient_sent`, `completed`; `whatsapp.queued` and `whatsapp.sent`; the two `business.settings_updated` switch changes |
+| Safety | 0 duplicate provider IDs, 0 duplicate recipients, 0 stuck recipients or messages, failed_jobs 0. Invoices, payments, claims, quote and reminder data unchanged. |
+
+**Conversation behaviour:** the broadcast message is stored in the contact's existing open WhatsApp conversation (#7), because `openConversation` reuses any non-closed conversation for the identity. The conversation mode (`human`) and assignee did not change; only `last_message_at` moved. An outbound broadcast does not open the 24-hour window, which only counts inbound messages.
+
 ## Email unsubscribe
 
 - Every broadcast email has a signed, login-free link: `GET /email/unsubscribe/{contact}/{broadcast}?signature=…` (`URL::signedRoute('broadcasts.unsubscribe')`). It shows a confirmation page; the button POSTs to the same signed URL.
@@ -184,13 +235,14 @@ Broadcasts never read or write invoices, payments, claims, quotes, reminder rule
 
 1. Use only the owner's own contact(s), with genuine broadcast consent recorded by the owner.
 2. Email: create a "Selected contacts" broadcast with only the owner's contact; confirm count 1; send. Expect the email (no attachment) with an unsubscribe link and the recipient row `Sent`. Click unsubscribe → confirmation page → contact shows "Unsubscribed"; a new draft shows 0 eligible.
-3. WhatsApp (only after a Marketing template is Approved and configured): same with the owner's WhatsApp contact; expect the template on the phone, recipient `Sent` then `Delivered`, and a `wamid` stored.
+3. WhatsApp (only after a Marketing template is Approved and configured): same with the owner's WhatsApp contact; expect the template on the phone, recipient `Sent` then `Delivered`, and a `wamid` stored. **Done in Task 041: PASS** (see Production UAT above). The email UAT is still to be done.
 4. Check no customer conversation besides the owner's received anything, and invoices/payments are unchanged.
 
 ## Limitations / deferred
 
 - No scheduling, segmentation beyond the three audiences, templates with header media or buttons, per-recipient variables beyond `contact_name`, or resend of failed recipients.
 - WhatsApp template category/approval is not verified via the API at send time (operator assertion).
+- Turning `broadcasts_enabled` off blocks new sends (preview and start) but does not stop a broadcast that is already queued or sending. Use Cancel for that.
 - Email delivery status beyond "accepted by provider" (no Resend webhooks), so email recipients stop at `Sent`.
 - No automatic opt-out from WhatsApp replies such as "STOP"; staff record opt-outs on the contact.
 - Unsubscribe link targets a contact, so contacts sharing one address are unsubscribed individually.

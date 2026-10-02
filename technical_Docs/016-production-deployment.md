@@ -1226,6 +1226,52 @@ Post-deploy verification at 15:30 WAT:
 
 Local verification: `WhatsAppPhoneNormalizationTest` 10/10 (8 of them fail on the previous code); full suite 342 tests, 340 passed, 2 skipped, 1,687 assertions; `npm run build` succeeds. No WhatsApp message was sent.
 
+## Task 041 — Marketing template + controlled WhatsApp broadcast UAT (2026-10-02) — PASS, SWITCH OFF
+
+No code change and no deploy: production still runs `e7a4fd6`. Template details and full results: 017 → Production Marketing template / Production UAT.
+
+**Meta (read-only, HTTP 200):**
+- `broadcast_test` is MARKETING, APPROVED, `en`.
+- BODY only (no header, footer or buttons), with exactly one variable, `{{1}}`. The text matches the owner's brief.
+- It is the only Marketing template; the Utility templates are unchanged.
+
+**Configuration (server `.env` only):**
+- Backup: `/home/adman/.env.bak-041-20261002-154155` (mode 600).
+- Added `WHATSAPP_TEMPLATE_BROADCAST=broadcast_test`, `_LANGUAGE=en`, `_ENABLED=true`, `_PARAMETERS=contact_name`.
+- Config cache rebuilt (`adman:www-data` 640, `.env` 600), PHP-FPM reloaded, Horizon restarted.
+- The cached config resolves to the same values. The four transactional templates are unchanged (names, `en`, enabled).
+
+**Consent:** recorded by the owner before the task (staff-recorded, audited 14:37 and 14:40 WAT). It was not modified.
+
+The test contact (#2):
+- is a customer and not archived;
+- has a valid email;
+- has email broadcast opt-in on, with no unsubscribe;
+- has WhatsApp broadcast opt-in on, with no opt-out;
+- has an active canonical identity, #7.
+
+**Preview (unsaved):**
+- Selected contact #2: 1 eligible, 0 excluded, template `broadcast_test` / `en`. The only blocker was the business switch.
+- The Customers audiences would also have produced only contact #2.
+
+**Live UAT:** at 15:43:38 WAT the switch was turned on (audited), and broadcast #1 was created and started with a confirmed count of 1. The switch was turned off in the same second (audited); it is only read at preview and start time.
+
+Outcome:
+- Broadcast #1: `completed` at 15:43:42.
+- Recipient #1: `delivered` at 15:43:50.
+- Message #129: `broadcast_template`, `broadcast_test` / `en`, body parameter = the contact's name, one wamid, stored in existing conversation #7. The conversation stayed `human`, assigned to user 1.
+
+After the send:
+- 1 broadcast, 1 recipient, 1 new message; 0 duplicate provider IDs; nothing stuck; failed_jobs 0; queue 0.
+- Unchanged: RCPT-00001 (₦1,000, confirmed); INV-00002 (partially paid, ₦56,000 outstanding); other invoices; the 3 claims (`pending_verification`); QT-00001 (issued); contact #2's reminder channel (`both`).
+- No email broadcast was sent.
+
+Health: `/up` and `/login` 200; `adman:production-check` and `--strict` exit 0; database, Redis and queue ok; Horizon running; scheduler timer active; 0 `laravel.log` errors today. Memory: 424 MB available; disk 22% used.
+
+Local regression after the UAT (no code change): 342 tests, 340 passed, 2 skipped, 1,687 assertions; `npm run build` succeeds.
+
+**Final switch state:** `broadcasts_enabled = 0`. The template configuration stays enabled; on its own it sends nothing.
+
 ---
 
 ## Approval reminders (from Task 016)
