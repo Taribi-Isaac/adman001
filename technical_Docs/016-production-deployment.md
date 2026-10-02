@@ -1272,6 +1272,38 @@ Local regression after the UAT (no code change): 342 tests, 340 passed, 2 skippe
 
 **Final switch state:** `broadcasts_enabled = 0`. The template configuration stays enabled; on its own it sends nothing.
 
+## Task 042 — Controlled email broadcast UAT (2026-10-02) — PASS, SWITCH OFF
+
+No code, configuration or deploy change: production still runs `e7a4fd6`. Details: 017 → Email broadcast UAT.
+
+**Preflight (read-only):**
+- `broadcasts_enabled = 0`; outbound email enabled; mailer `resend` with key and sender set (values not printed).
+- Recent transactional emails were `sent`. Horizon running; failed_jobs 0; queue 0.
+- The owner account has `broadcasts.manage` and `broadcasts.send`.
+- Contact #2 is a customer, not archived, with a valid email, email broadcast opt-in recorded by staff (14:40 WAT) and no unsubscribe. Selected-contact preview: 1 eligible, 0 excluded. The only blocker was the switch.
+
+**Content:** the body was only the two approved paragraphs, because the broadcast template adds "Hello <name>," itself and has no placeholder substitution. The email was rendered on production without sending and reviewed: subject, greeting with the contact name, body, sign-off, unsubscribe footer, `List-Unsubscribe` headers, no attachment.
+
+**Live UAT:** at 16:45:56 WAT the switch was turned on (audited), and broadcast #2 was created and started with a confirmed count of 1. The switch was turned off in the same second (audited).
+
+Outcome:
+- Broadcast #2: `completed` at 16:45:58.
+- Recipient #2: `sent`.
+- Message #130: email, `template_key = broadcast`, no document, in the contact's email conversation #8. Stored provider ID `laravel-mail-130`, the existing behaviour for all emails.
+- Resend (read-only API): email `01a0fd4b-2f9a-70a5-9c0f-4b822771a365`, `last_event = delivered`. It is the only email with this subject.
+
+**Safety:**
+- 2 broadcasts and 2 recipients in total; 1 new message; 0 duplicate provider IDs or recipients; nothing stuck; failed_jobs 0; queue 0.
+- No WhatsApp message.
+- Unchanged: RCPT-00001 (₦1,000, confirmed); INV-00002 (partially paid, ₦56,000 outstanding); the 3 claims (`pending_verification`); QT-00001 (issued); reminder occurrences; contact #2 (reminder channel `both`, no unsubscribe); conversation #7 (`human`, user 1).
+- The WhatsApp broadcast and transactional template configuration is unchanged.
+
+Health: `/up` and `/login` 200; `adman:production-check` and `--strict` exit 0; database, Redis and queue ok; Horizon running; scheduler timer active; 0 `laravel.log` errors today. Memory: 414 MB available; disk 22% used.
+
+Local regression: 342 tests, 340 passed, 2 skipped, 1,687 assertions; `npm run build` succeeds.
+
+**Final switch state:** `broadcasts_enabled = 0`.
+
 ---
 
 ## Approval reminders (from Task 016)

@@ -9,11 +9,11 @@ A small, controlled way to send one message to customers who **explicitly agreed
 
 There is no scheduling, segmentation, A/B testing, analytics, or automation. Each broadcast is a one-off that an authorised person reviews and sends by hand.
 
-## Production state (2026-10-02, after Task 041)
+## Production state (2026-10-02, after Task 042)
 
 | Gate | State |
 | --- | --- |
-| `businesses.broadcasts_enabled` | **false**. It was on for under a second for the Task 041 UAT, then returned to off. Both changes are audited as `business.settings_updated`. |
+| `businesses.broadcasts_enabled` | **false**. It was on for under a second for each controlled UAT (Task 041 WhatsApp, Task 042 email), then returned to off. Every change is audited as `business.settings_updated`. |
 | Approved Meta Marketing template | `broadcast_test`: MARKETING, APPROVED, `en` (see Production Marketing template) |
 | `WHATSAPP_TEMPLATE_BROADCAST*` env | `broadcast_test` / `en` / enabled / `contact_name` (set 2026-10-02) |
 | Contacts with WhatsApp broadcast opt-in | 1: the owner's test contact, recorded by staff on 2026-10-02 |
@@ -198,6 +198,32 @@ Broadcast #1, "Task 041 WhatsApp broadcast UAT":
 
 **Conversation behaviour:** the broadcast message is stored in the contact's existing open WhatsApp conversation (#7), because `openConversation` reuses any non-closed conversation for the identity. The conversation mode (`human`) and assignee did not change; only `last_message_at` moved. An outbound broadcast does not open the 24-hour window, which only counts inbound messages.
 
+### Email broadcast UAT (Task 042, 2026-10-02) — PASS
+
+Broadcast #2, "Task 042 Email broadcast UAT":
+- Email, Selected contacts, the owner's test contact only.
+- Subject `ADMAN Email Broadcast UAT`.
+- Preview: 1 eligible, 0 excluded. Sent by the owner account through `BroadcastService`.
+
+The template adds the greeting `Hello <contact display name>,` itself; message bodies have no placeholder syntax. So the body was only the two approved paragraphs, which gave the intended "Hello Taribi Isaac," greeting. Before sending, the email was rendered on production without sending:
+- correct subject;
+- 0 attachments;
+- greeting with the contact name, then the two paragraphs;
+- the standard "Thanks, Raslordeck Limited" sign-off;
+- the unsubscribe footer;
+- `List-Unsubscribe` and `List-Unsubscribe-Post` headers.
+
+| Item | Result |
+| --- | --- |
+| Broadcast | `completed`: send requested 16:45:56, started 16:45:57, completed 16:45:58 WAT. 1 recipient. |
+| Recipient #2 | contact #2, email identity #8, `sent`: queued 16:45:57, sent 16:45:58 |
+| Message #130 | email, outbound, `template_key = broadcast`, no document, subject and body as approved. Stored in the contact's existing email conversation (#8). Status `sent`. |
+| Resend | accepted, then `last_event = delivered` (read-only Resend API check). Exactly one email with this subject. |
+| Audits | `broadcast.created`, `send_requested`, `started`, `recipient_queued`, `recipient_sent`, `completed`; `email.queued` and `email.sent`; the two `business.settings_updated` switch changes |
+| Safety | 0 duplicate provider IDs or recipients; nothing stuck; failed_jobs 0. No WhatsApp message. Invoices, payments, claims, quote, reminders and conversation #7 unchanged. Unsubscribe not clicked; consent unchanged. |
+
+**Provider ID:** ADMAN stores `laravel-mail-<message id>` for every email, transactional and broadcast alike. The adapter only records an ID when the transport returns a `Message-ID` header, and Resend's ID is not returned. The real Resend email ID can be found in the Resend dashboard or API by subject and time. With no Resend webhooks, ADMAN email recipients stop at `Sent`.
+
 ## Email unsubscribe
 
 - Every broadcast email has a signed, login-free link: `GET /email/unsubscribe/{contact}/{broadcast}?signature=…` (`URL::signedRoute('broadcasts.unsubscribe')`). It shows a confirmation page; the button POSTs to the same signed URL.
@@ -235,7 +261,7 @@ Broadcasts never read or write invoices, payments, claims, quotes, reminder rule
 
 1. Use only the owner's own contact(s), with genuine broadcast consent recorded by the owner.
 2. Email: create a "Selected contacts" broadcast with only the owner's contact; confirm count 1; send. Expect the email (no attachment) with an unsubscribe link and the recipient row `Sent`. Click unsubscribe → confirmation page → contact shows "Unsubscribed"; a new draft shows 0 eligible.
-3. WhatsApp (only after a Marketing template is Approved and configured): same with the owner's WhatsApp contact; expect the template on the phone, recipient `Sent` then `Delivered`, and a `wamid` stored. **Done in Task 041: PASS** (see Production UAT above). The email UAT is still to be done.
+3. WhatsApp (only after a Marketing template is Approved and configured): same with the owner's WhatsApp contact; expect the template on the phone, recipient `Sent` then `Delivered`, and a `wamid` stored. **Done in Task 041: PASS** (see Production UAT above). Email send done in Task 042: **PASS** (see Email broadcast UAT; the unsubscribe click was not repeated in production).
 4. Check no customer conversation besides the owner's received anything, and invoices/payments are unchanged.
 
 ## Limitations / deferred
@@ -243,6 +269,7 @@ Broadcasts never read or write invoices, payments, claims, quotes, reminder rule
 - No scheduling, segmentation beyond the three audiences, templates with header media or buttons, per-recipient variables beyond `contact_name`, or resend of failed recipients.
 - WhatsApp template category/approval is not verified via the API at send time (operator assertion).
 - Turning `broadcasts_enabled` off blocks new sends (preview and start) but does not stop a broadcast that is already queued or sending. Use Cancel for that.
-- Email delivery status beyond "accepted by provider" (no Resend webhooks), so email recipients stop at `Sent`.
+- Email delivery status beyond "accepted by provider" (no Resend webhooks), so email recipients stop at `Sent`. The Resend email ID is not captured; ADMAN stores `laravel-mail-<message id>`.
+- Email bodies have no placeholder substitution: the template's greeting is the only personalised part.
 - No automatic opt-out from WhatsApp replies such as "STOP"; staff record opt-outs on the contact.
 - Unsubscribe link targets a contact, so contacts sharing one address are unsubscribed individually.
