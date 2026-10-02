@@ -1130,6 +1130,38 @@ Health: `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, 
 
 Follow-up items (not implemented): local phone-number normalization; optional secure link in the in-window caption; see 008 → Post-037R2 follow-up items. Broadcasts start with Task 038.
 
+## Task 038 — Broadcast foundation (2026-10-02) — DEPLOYED, BROADCASTS DISABLED
+
+Commit `35edb5d` was pushed to `main`. The CI `tests` run and `deploy-production` (run 37009119450) both succeeded. Architecture, gates and the enablement/UAT procedure: [017-broadcasts.md](017-broadcasts.md).
+
+Migrations applied on production (all additive and reversible):
+- `2026_10_02_100000_add_whatsapp_broadcast_opt_in_to_contacts`
+- `2026_10_02_110000_create_broadcasts_tables`
+- `2026_10_02_120000_add_broadcast_permissions`
+
+The permissions migration creates `broadcasts.manage` and `broadcasts.send` and grants them to Super Administrator.
+
+Production state after the deploy (verified at 13:52 WAT, read-only):
+- `businesses.broadcasts_enabled = 0`; it was **not** enabled.
+- The `broadcasts` and `broadcast_recipients` tables are empty.
+- 0 contacts have a WhatsApp broadcast opt-in, and 0 have an email broadcast unsubscribe.
+- `WHATSAPP_TEMPLATE_BROADCAST*` is not set, so the broadcast template is disabled and has no name. Meta has no approved Marketing template (`MARKETING_COUNT=0` at the Task 038 read-only check), so WhatsApp broadcasts are blocked by Meta until the owner creates and approves one.
+- Unchanged:
+  - RCPT-00001: ₦1,000, confirmed.
+  - INV-00002: partially paid, ₦56,000 outstanding.
+  - Other invoices are unpaid.
+  - Conversation #7 is `human`, assigned to user 1.
+  - The test contact's reminder channel is `both`.
+
+Health: `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, database, Redis and queue ok, Horizon running, scheduler timer active, queue size 0, failed_jobs 0, no new `laravel.log` errors since 2026-09-26.
+
+Local verification before the push:
+- focused tests: `BroadcastTest` 41/41 and `ContactConsentTest` 18/18;
+- full suite: 332 tests, 330 passed, 2 skipped, 1,634 assertions;
+- `npm run build` succeeds.
+
+No broadcast was created or sent, and no messages were sent to customers.
+
 ---
 
 ## Approval reminders (from Task 016)
