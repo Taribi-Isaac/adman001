@@ -1196,6 +1196,36 @@ To unblock:
 - **Email:** the owner records a genuine email broadcast opt-in for a deliberate test contact (contact form → Broadcast consent), then reruns the UAT.
 - **WhatsApp:** additionally needs a Meta-approved Marketing template whose body has no parameters or only `{{1}}` = contact name, configured through `WHATSAPP_TEMPLATE_BROADCAST*`. The contact also needs a WhatsApp broadcast opt-in.
 
+## Task 040 — WhatsApp phone normalization (2026-10-02) — DEPLOYED
+
+Commit `e7a4fd6` was pushed to `main`. The CI `tests` run (37017883460) and `deploy-production` (37018085239) both succeeded. There are no migrations and no schema or data changes. Details: 008 → Identity normalization.
+
+What changed:
+- `WhatsAppPhone::normalize` converts Nigerian local mobile numbers (`07054998090`) and the `+234 (0)…` form to the canonical `2347054998090`.
+- A `creating` hook on `CommunicationIdentity` stores new WhatsApp identities in canonical form. The existing unique `(channel, external_id)` index then blocks equivalent duplicates.
+
+Preflight (read-only) found two legacy duplicate pairs, created before the fix:
+
+| Canonical identity | Legacy duplicate |
+| --- | --- |
+| #7 `2347054998090` (Taribi Isaac, 31 messages) | #12 `07054998090` (1 failed quote message, #121) |
+| #5 `2349067322344` (unlinked, 36 messages) | #6 `09067322344` (1 recorded staff message) |
+
+They were reported and left untouched. A cleanup proposal is in 008.
+
+Post-deploy verification at 15:30 WAT:
+- **Resolution:** `07054998090`, `+2347054998090`, `0705 499 8090` and `2347054998090` all resolve to identity #7 (contact 2, active, 31 messages). `09067322344` resolves to #5.
+- **No new data:** identities still 12 (max ID 12); messages 128 (max ID 128); conversations 12.
+- Contact 2's phone is unchanged (`+2347054998090`) and its reminder channel is still `both`.
+- **Unchanged:**
+  - RCPT-00001: confirmed at ₦1,000. INV-00002: partially paid, ₦56,000 outstanding.
+  - The 3 payment claims are still `pending_verification`. QT-00001: issued.
+  - Conversation #7: `human`, assigned to user 1.
+  - `broadcasts_enabled = 0`.
+- **Health:** `/up` and `/login` 200; `adman:production-check` and `--strict` exit 0; database, Redis and queue ok; Horizon running; scheduler timer active; failed_jobs 0; queue size 0; 0 `laravel.log` errors today. Memory: 443 MB available; disk 22% used.
+
+Local verification: `WhatsAppPhoneNormalizationTest` 10/10 (8 of them fail on the previous code); full suite 342 tests, 340 passed, 2 skipped, 1,687 assertions; `npm run build` succeeds. No WhatsApp message was sent.
+
 ---
 
 ## Approval reminders (from Task 016)
