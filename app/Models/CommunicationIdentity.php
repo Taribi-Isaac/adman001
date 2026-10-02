@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\CommunicationChannel;
+use App\Support\WhatsAppPhone;
 use Database\Factories\CommunicationIdentityFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -46,6 +47,25 @@ class CommunicationIdentity extends Model
             'channel' => CommunicationChannel::class,
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * New WhatsApp identities are always stored in canonical form, so the unique
+     * (channel, external_id) index also blocks equivalent spellings of one number.
+     * Only applied on create: legacy non-canonical rows are left as they are.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (CommunicationIdentity $identity): void {
+            if ($identity->channel !== CommunicationChannel::WhatsApp) {
+                return;
+            }
+
+            $canonical = WhatsAppPhone::normalize($identity->external_id);
+            if ($canonical !== null) {
+                $identity->external_id = $canonical;
+            }
+        });
     }
 
     public function isLinked(): bool

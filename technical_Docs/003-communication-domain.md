@@ -40,7 +40,7 @@ Table: `communication_identities`
 | Column | Notes |
 | --- | --- |
 | `channel` | `whatsapp` \| `email` (extensible string enum) |
-| `external_id` | Provider/channel address (unique per channel) |
+| `external_id` | Provider/channel address (unique per channel). WhatsApp: canonical digits with country code (`2347054998090`), see 008 → Identity normalization; email: lowercase address |
 | `display_name` | Optional channel-supplied name |
 | `contact_id` | Optional FK to `contacts` (`nullOnDelete`) |
 | `is_active` | Soft activity flag |

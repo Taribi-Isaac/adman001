@@ -105,14 +105,48 @@ Official references: [Cloud API Get Started](https://developers.facebook.com/doc
 
 ## Identity normalization
 
-`WhatsAppPhone::normalize`:
+**Canonical format:** digits only, with the country code and no `+` (for example `2347054998090`). This is the value Meta sends as `from` / `wa_id`, and the value the adapter sends as `to`.
 
-- Strip non-digits
-- Strip leading `00` international prefix
-- Require 8–15 digits
-- Prefer `Contact.whatsapp_id`, else `Contact.phone`
+`App\Support\WhatsAppPhone::normalize` is the only normalizer. Every WhatsApp path goes through it: inbound sender and contact matching, outbound recipient (`fromContact`), staff-started conversations, broadcast eligibility, and `ConversationService::findOrCreateIdentity`.
 
-Stored as `CommunicationIdentity.external_id` with `channel=whatsapp`.
+Rules, in order:
+1. Strip every non-digit (spaces, `+`, `-`, parentheses).
+2. Strip a leading `00` international prefix.
+3. Convert Nigerian mobile numbers (Task 040):
+   - local form `0[789][01]` + 8 digits (`07054998090`, `0803…`, `0812…`, `0906…`) becomes `234` + the number without the leading 0;
+   - `234` followed by the local trunk 0 (`+234 (0) 705…`) drops that 0.
+4. Require 8–15 digits.
+
+Equivalent inputs therefore resolve to the same value: `07054998090`, `0705 499 8090`, `+2347054998090`, `+234 (0) 705 499 8090`, `002347054998090` and `2347054998090` all become `2347054998090`.
+
+Not converted:
+- Numbers that already carry another country code are never treated as Nigerian, for example `+44 7911 123456` becomes `447911123456` and `+1 415…` becomes `1415…`.
+- A leading 0 is only removed for the Nigerian mobile pattern; other numbers starting with 0 pass through unchanged.
+
+For contacts, `fromContact` prefers `Contact.whatsapp_id`, else `Contact.phone`. Contact fields keep exactly what staff typed; only the identity and recipient values are canonical.
+
+**Duplicate protection:**
+- `communication_identities` has a unique index on `(channel, external_id)`.
+- `findOrCreateIdentity` canonicalizes before `firstOrCreate`.
+- A `creating` hook on `CommunicationIdentity` canonicalizes WhatsApp `external_id` for any other insert.
+
+So a second identity for an equivalent spelling of an existing number cannot be created: the canonical value hits the unique index. The hook runs on create only, so legacy rows are never rewritten.
+
+**Legacy duplicates (production, created before Task 040; kept as history, not merged):**
+
+| Canonical identity | Legacy duplicate | Origin |
+| --- | --- | --- |
+| #7 `2347054998090` (Taribi Isaac) | #12 `07054998090` | Quote send on 2026-10-01 while the contact phone was `0705…`. One message, #121, failed with `131042`. |
+| #5 `2349067322344` (unlinked) | #6 `09067322344` | Staff-started conversation on 2026-09-26. One staff message, #20, `recorded`. |
+
+New activity for either number resolves to the canonical identity. If staff reply from an old legacy conversation, the recipient is still normalized to the canonical number. Proposed cleanup, as a separate owner-approved task:
+1. Close the legacy conversation.
+2. Deactivate the legacy identity (`is_active = false`).
+3. Leave its messages and audits in place.
+
+Re-pointing conversations to the canonical identity is possible, but it rewrites history and is not recommended.
+
+Limitation: numbers written in local form are assumed to be Nigerian; there is no per-business default country. Non-Nigerian numbers must include their country code.
 
 Unknown inbound senders create an identity **without** creating a Customer.
 
@@ -208,11 +242,11 @@ Provider IDs (`wamid`) are stored on each message (`external_message_id`) and in
 
 **History during the UAT.** Messages #121 and #122 (quote, `quote_document`) were accepted by Meta and then failed with `131042`: the WhatsApp account's payment method was blocked (`health_status` error `141006`). The owner fixed the Meta payment method and the retest (#123) was delivered. #121 also went to a separate identity created from a local-format phone number (see the finding below).
 
-**Data finding: local-format phone numbers.** Contact phone `0705…` (no country code) normalizes to `070…`. ADMAN created a separate WhatsApp identity for it, not the existing `234…` identity the owner messages from. Meta still delivered by adding the business country code, but ADMAN checks the 24-hour window on the wrong identity, so that contact's window always looks closed. Store WhatsApp numbers with the country code (`+234…`), as the identity rules require (see Identity normalization). The UAT contact was corrected to `+234…`; the extra identity and its conversation remain as history.
+**Data finding: local-format phone numbers.** Contact phone `0705…` (no country code) normalizes to `070…`. ADMAN created a separate WhatsApp identity for it, not the existing `234…` identity the owner messages from. Meta still delivered by adding the business country code, but ADMAN checks the 24-hour window on the wrong identity, so that contact's window always looks closed. Store WhatsApp numbers with the country code (`+234…`), as the identity rules require (see Identity normalization). The UAT contact was corrected to `+234…`; the extra identity and its conversation remain as history. **Resolved in Task 040:** local-format numbers now normalize to `234…` (see Identity normalization).
 
-### Post-037R2 follow-up items (not implemented)
+### Post-037R2 follow-up items
 
-- **Local phone-number normalization:** a local-format number (`070…`) creates a separate identity instead of resolving to the international `234…` identity. Worth a small, separate hardening task.
+- **Local phone-number normalization:** done in Task 040. The two legacy duplicate identities remain as history; see Identity normalization.
 - **In-window secure-link caption:** consider adding the secure document link to the existing in-window document caption in a future, scoped improvement.
 - **Test payment:** RCPT-00001 is a genuine confirmed ₦1,000 payment. There is no reversal workflow; leave it as is.
 - **UAT contact reminder channel:** the owner's test contact still has reminder channel `both` (WhatsApp and email).
