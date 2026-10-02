@@ -1323,6 +1323,35 @@ Tests: `BroadcastTest` and `ContactConsentTest` 59/59; full suite 342 tests, 340
 
 Health: `/up` and `/login` 200; `adman:production-check` and `--strict` exit 0; database, Redis and queue ok; Horizon running; scheduler timer active; 0 `laravel.log` errors today. Memory: 414 MB available; disk 22% used.
 
+## Task 045 — Production WhatsApp broadcast template configured (2026-10-02) — SWITCH OFF
+
+No code change and no deploy: production still runs `e7a4fd6`. Task 044 stopped because the template did not exist yet.
+
+**Meta (read-only, HTTP 200):** `raslordeck_broadcast` is MARKETING, APPROVED, `en`. BODY only (no header, footer or buttons), with exactly one variable, `{{1}}`. The body matches the intended wording exactly. This is compatible with ADMAN, whose only parameter is `contact_name` → `{{1}}`.
+
+**Configuration (server `.env` only):**
+- Backup: `/home/adman/.env.bak-045-20261002-181725` (mode 600).
+- Changed `WHATSAPP_TEMPLATE_BROADCAST` from `broadcast_test` to `raslordeck_broadcast`. `_LANGUAGE=en`, `_ENABLED=true` and `_PARAMETERS=contact_name` are unchanged.
+- Config cache rebuilt (`adman:www-data` 640, `.env` 600), PHP-FPM reloaded, Horizon restarted.
+
+**Verification:**
+- `.env`, cached config, `WhatsAppBroadcastTemplate` and an unsaved broadcast preview all resolve to `raslordeck_broadcast` / `en` / `contact_name`.
+- No `broadcast_test` reference remains in `.env`, the cached config or the application code. `broadcast_test` stays approved in Meta (not deleted).
+- The preview still reports "Broadcasts are turned off in Business settings."
+- The four transactional templates are unchanged: Utility, approved, `en`, enabled, DOCUMENT header.
+
+**Data unchanged:**
+- `broadcasts_enabled = 0`; 2 broadcasts and 2 recipients (the UAT records).
+- Messages max ID 130; audit events max ID 379.
+- Consent unchanged (1 WhatsApp and 1 email broadcast opt-in); `broadcasts.send` still held only by Super Administrator.
+- Payments, invoices, claims and quote unchanged; failed_jobs 0; queue 0.
+
+Tests: `BroadcastTest` and `ContactConsentTest` 59/59; full suite 342 tests, 340 passed, 2 skipped, 1,687 assertions; `npm run build` succeeds.
+
+Health: `/up` and `/login` 200; `adman:production-check` and `--strict` exit 0; database, Redis and queue ok; Horizon running; scheduler timer active; 0 `laravel.log` errors today. Memory: 420 MB available; disk 22% used.
+
+No broadcast was created or sent.
+
 ---
 
 ## Approval reminders (from Task 016)
