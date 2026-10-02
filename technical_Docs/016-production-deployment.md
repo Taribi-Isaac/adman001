@@ -1304,6 +1304,25 @@ Local regression: 342 tests, 340 passed, 2 skipped, 1,687 assertions; `npm run b
 
 **Final switch state:** `broadcasts_enabled = 0`.
 
+## Task 043 — Broadcast readiness review (2026-10-02) — READY, SWITCH OFF
+
+A read-only review: no code, configuration, data or deploy change, and no broadcast sent. Production still runs `e7a4fd6`.
+
+**Configuration and Meta:**
+- `WHATSAPP_TEMPLATE_BROADCAST` = `broadcast_test` / `en` / enabled / `contact_name` (`.env` and cached config agree).
+- Meta re-check (HTTP 200): `broadcast_test` is MARKETING, APPROVED, `en`, BODY only, one variable `{{1}}`.
+- It is the UAT template; replace it before a real campaign (017 → UAT configuration vs production campaign configuration).
+- The four transactional Utility templates are unchanged (approved, `en`, enabled). Resend is configured.
+
+**Data unchanged during the review:**
+- `broadcasts_enabled = 0`; broadcasts #1 and #2 and their recipients untouched.
+- Messages max ID 130; audit events max ID 379; failed_jobs 0; queue 0.
+- Payments, invoices, claims and contacts unchanged.
+
+Tests: `BroadcastTest` and `ContactConsentTest` 59/59; full suite 342 tests, 340 passed, 2 skipped, 1,687 assertions; `npm run build` succeeds.
+
+Health: `/up` and `/login` 200; `adman:production-check` and `--strict` exit 0; database, Redis and queue ok; Horizon running; scheduler timer active; 0 `laravel.log` errors today. Memory: 414 MB available; disk 22% used.
+
 ---
 
 ## Approval reminders (from Task 016)

@@ -9,17 +9,46 @@ A small, controlled way to send one message to customers who **explicitly agreed
 
 There is no scheduling, segmentation, A/B testing, analytics, or automation. Each broadcast is a one-off that an authorised person reviews and sends by hand.
 
-## Production state (2026-10-02, after Task 042)
+## Production state (2026-10-02, readiness review in Task 043)
 
 | Gate | State |
 | --- | --- |
 | `businesses.broadcasts_enabled` | **false**. It was on for under a second for each controlled UAT (Task 041 WhatsApp, Task 042 email), then returned to off. Every change is audited as `business.settings_updated`. |
-| Approved Meta Marketing template | `broadcast_test`: MARKETING, APPROVED, `en` (see Production Marketing template) |
-| `WHATSAPP_TEMPLATE_BROADCAST*` env | `broadcast_test` / `en` / enabled / `contact_name` (set 2026-10-02) |
+| WhatsApp UAT | **PASS** (Task 041): broadcast #1, 1 recipient, delivered |
+| Email UAT | **PASS** (Task 042): broadcast #2, 1 recipient, delivered according to Resend |
+| Configured WhatsApp template | `broadcast_test` / `en` / enabled / `contact_name`. This is the **UAT template**, not a campaign template (see below). |
 | Contacts with WhatsApp broadcast opt-in | 1: the owner's test contact, recorded by staff on 2026-10-02 |
 | Contacts with email broadcast opt-in | 1: the same contact, recorded by staff on 2026-10-02 |
 
 Nothing is sent while the switch is off. With the switch on, only contacts with recorded opt-ins are eligible.
+
+### UAT configuration vs production campaign configuration
+
+**UAT configuration (current):**
+- `WHATSAPP_TEMPLATE_BROADCAST=broadcast_test`. Meta: MARKETING, APPROVED, `en`, BODY only, one variable `{{1}}` = contact name. Re-checked read-only in Task 043.
+- Its wording says it is a test ("This is a test broadcast message… controlled WhatsApp broadcast test").
+- It was created only to prove the delivery path. **`broadcast_test` is a UAT template and must be replaced before a real customer-facing campaign.**
+
+**Production campaign configuration (not yet supplied):**
+- Before the first genuine customer-facing WhatsApp campaign, the owner creates a properly worded Marketing template in WhatsApp Manager and waits for Approved.
+- It must be compatible with ADMAN: no header, footer or buttons; a body with no variables, or only `{{1}}` = contact name.
+- Then set `WHATSAPP_TEMPLATE_BROADCAST` and `_LANGUAGE` (plus `_PARAMETERS` to match) to the exact approved values. Rebuild the config cache through the normal process.
+- ADMAN does not choose campaign wording, and a template is never created automatically.
+
+While the switch is off, leaving `broadcast_test` configured sends nothing. Anyone turning the switch on must first check which template is configured; the preview shows its name.
+
+**Email campaigns need no template change.** Staff supply the subject and body for each broadcast. The email template adds the greeting `Hello <contact display name>,`, the sign-off, and the unsubscribe footer and headers. There is no placeholder substitution in the body, and no attachments.
+
+### Operational rules
+
+- **Turning `broadcasts_enabled` off does not cancel a broadcast that is already queued or sending.** The switch is only read when previewing and starting. To stop a running broadcast, use **Cancel** on the broadcast page: pending recipients are cancelled, and already-queued messages are blocked by the delivery guard.
+- At most 500 recipients. A larger eligible audience is refused outright (never a partial send), and a Selected audience over 500 contacts fails validation.
+- Sending needs `broadcasts.send`, a reviewed preview and a confirmed recipient count. If the audience changed since the review, the send is refused.
+- Consent:
+  - Email needs an explicit email broadcast opt-in and no unsubscribe.
+  - WhatsApp needs an explicit WhatsApp broadcast opt-in (separate from the transactional opt-in) and no opt-out.
+  - Archived and Unknown contacts are never included. Nobody is opted in automatically.
+  - Eligibility is checked again just before each delivery.
 
 ## Architecture
 
@@ -180,7 +209,7 @@ WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS=contact_name
 
 After the change: config cache rebuilt (`adman:www-data` 640), PHP-FPM reloaded, Horizon restarted. `WhatsAppBroadcastTemplate::problem()` returns null. The transactional templates are unchanged.
 
-`broadcast_test` is a test template. For real campaigns, create and approve a properly worded Marketing template and change these values.
+`broadcast_test` is a UAT template. Replace it before a real customer-facing campaign (see UAT configuration vs production campaign configuration).
 
 ### Production UAT (Task 041) — PASS
 
