@@ -1162,6 +1162,40 @@ Local verification before the push:
 
 No broadcast was created or sent, and no messages were sent to customers.
 
+## Task 039 — Controlled broadcast UAT (2026-10-02) — BLOCKED, NOTHING SENT
+
+Production still runs `35edb5d`. No code change, no deploy, no configuration change. `broadcasts_enabled` was never switched on and is still `0`.
+
+Read-only preflight at 14:10 WAT:
+- **Meta:** HTTP 200. The only templates are the five Utility templates plus `hello_world`, all UTILITY / APPROVED; `MARKETING_COUNT=0`.
+  - **WhatsApp UAT: BLOCKED.** No approved Marketing template exists in Meta.
+- **Consent:**
+  - Contact #1 is archived.
+  - Contact #2 (the owner's test contact) has a valid email and a transactional WhatsApp opt-in, but no email broadcast opt-in and no WhatsApp broadcast opt-in.
+  - No consent was created for the test.
+  - **Email UAT: BLOCKED.** It requires a real, explicit broadcast opt-in before a message can be sent.
+- **Broadcast data:** 0 broadcasts and 0 recipients. `broadcasts.manage` and `broadcasts.send` are on Super Administrator only.
+- **Unchanged:**
+  - RCPT-00001: ₦1,000, confirmed. INV-00002: partially paid, ₦56,000 outstanding. INV-00001/3/4: unpaid.
+  - QT-00001: issued. The 3 payment claims are still `pending_verification`.
+  - Conversation #7: `human`, assigned to user 1. Contact #2's reminder channel: `both`.
+  - The four transactional Utility templates are still enabled (`en`). The mailer is `resend`.
+
+Unsubscribe mechanism, checked without sending: a URL generated on production is `https://adman.raslordeckltd.com/email/unsubscribe/{contact}/{broadcast}?signature=…`. It validates as signed, and changing the contact ID invalidates it. The signature was not recorded.
+
+Safety after the checks:
+- messages max ID still 128;
+- 0 duplicate `external_message_id`, 0 pending/processing messages;
+- failed_jobs 0, queue size 0.
+
+Health: `/up` and `/login` 200, `adman:production-check` and `--strict` exit 0, database, Redis and queue ok, Horizon running, scheduler timer active, 0 `laravel.log` errors on 2026-10-02. Memory 961 MB total, 405 MB available, swap 195 MB used; disk 22% used (5.1 GB of 24 GB).
+
+Local regression: 332 tests, 330 passed, 2 skipped, 1,634 assertions; `npm run build` succeeds.
+
+To unblock:
+- **Email:** the owner records a genuine email broadcast opt-in for a deliberate test contact (contact form → Broadcast consent), then reruns the UAT.
+- **WhatsApp:** additionally needs a Meta-approved Marketing template whose body has no parameters or only `{{1}}` = contact name, configured through `WHATSAPP_TEMPLATE_BROADCAST*`. The contact also needs a WhatsApp broadcast opt-in.
+
 ---
 
 ## Approval reminders (from Task 016)
