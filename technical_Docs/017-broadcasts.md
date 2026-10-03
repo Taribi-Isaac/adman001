@@ -9,7 +9,7 @@ A small, controlled way to send one message to customers who **explicitly agreed
 
 There is no scheduling, segmentation, A/B testing, analytics, or automation. Each broadcast is a one-off that an authorised person reviews and sends by hand.
 
-## Production state (2026-10-02, after Task 045)
+## Production state (2026-10-03, after Task 046)
 
 | Gate | State |
 | --- | --- |
@@ -17,6 +17,7 @@ There is no scheduling, segmentation, A/B testing, analytics, or automation. Eac
 | WhatsApp UAT | **PASS** (Task 041, sent with the UAT template `broadcast_test`): broadcast #1, 1 recipient, delivered |
 | Email UAT | **PASS** (Task 042): broadcast #2, 1 recipient, delivered according to Resend |
 | Configured WhatsApp template | **`raslordeck_broadcast`** / `en` / enabled / `contact_name`: the production Marketing template (Task 045, see below) |
+| Campaign message (`{{2}}`) | Implemented and deployed (Task 046), **not active**: the two-variable template `raslordeck_broadcast_v2` does not exist in Meta yet (read-only check, 2026-10-03). Until it is approved and configured, WhatsApp broadcasts keep the fixed `raslordeck_broadcast` wording. See [WhatsApp campaign message](#whatsapp-campaign-message-task-046). |
 | Contacts with WhatsApp broadcast opt-in | 1: the owner's test contact, recorded by staff on 2026-10-02 |
 | Contacts with email broadcast opt-in | 1: the same contact, recorded by staff on 2026-10-02 |
 
@@ -56,7 +57,7 @@ WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS=contact_name
 
 After the change: config cache rebuilt (`adman:www-data` 640, `.env` 600), PHP-FPM reloaded, Horizon restarted. The cached config, the template service and the broadcast preview all resolve to `raslordeck_broadcast` / `en`.
 
-The wording is fixed by the template. Every WhatsApp campaign sends the same text, personalised only with the contact's name. Campaign-specific text (a second variable such as `{{2}}`) is not supported and would need an application change.
+The wording is fixed by the template. Every WhatsApp campaign sends the same text, personalised only with the contact's name. ADMAN supports campaign-specific text since Task 046 (`{{2}}`), but only with a template that has that second variable (`raslordeck_broadcast_v2`, not yet created in Meta).
 
 **UAT template (history): `broadcast_test`.**
 - Approved Marketing template with test wording, used only for the Task 041 controlled UAT.
@@ -107,13 +108,14 @@ No second messaging system: every broadcast message is an ordinary `Message` in 
 - `App\Services\BroadcastEligibilityService` — single source of truth for who may receive a broadcast (Task 035, extended)
 - `App\Jobs\ProcessBroadcastJob` (`ShouldBeUniqueUntilProcessing`, 3 tries, `failed()` stops the broadcast)
 - `App\Observers\MessageObserver` (registered on `Message` via `#[ObservedBy]`, runs after commit)
-- `App\Support\WhatsAppBroadcastTemplate` — reads and validates the Marketing template config
+- `App\Support\WhatsAppBroadcastTemplate` — reads and validates the Marketing template config; builds the body parameters (`contact_name`, `broadcast_message`) and checks the broadcast's content fits the template (`problemFor`)
+- `App\WhatsApp\WhatsAppTemplateCatalog` — read-only, cached (10 min) lookup of an APPROVED template's body text in WhatsApp Manager, used only for the preview (Task 046)
 - `App\Http\Controllers\Broadcasts\BroadcastController`, `BroadcastUnsubscribeController`, `routes/broadcasts.php`
 - Vue: `pages/broadcasts/Index|Create|Edit|Show.vue`, `components/broadcasts/BroadcastForm.vue`
 
 ### Data model
 
-`broadcasts`: name, channel, audience_type, selected_contact_ids (json), subject/body (email), whatsapp_template_name/language (snapshot at start), status, recipient_limit / recipient_count / exclusion_summary (snapshot at start), failure_reason, created_by / sent_by / cancelled_by, send_requested_at / started_at / completed_at / cancelled_at / failed_at.
+`broadcasts`: name, channel, audience_type, selected_contact_ids (json), subject/body (email), whatsapp_template_name/language (snapshot at start), whatsapp_message (nullable text, the WhatsApp campaign message for `{{2}}`, Task 046; null for email and for broadcasts created before Task 046), status, recipient_limit / recipient_count / exclusion_summary (snapshot at start), failure_reason, created_by / sent_by / cancelled_by, send_requested_at / started_at / completed_at / cancelled_at / failed_at.
 
 `broadcast_recipients`: broadcast_id, contact_id, communication_identity_id, channel, address, status, message_id (**unique**), provider_message_id, failure_reason, queued/sent/delivered/failed timestamps. **Unique (broadcast_id, contact_id).**
 
@@ -151,7 +153,7 @@ Consent snapshot: `start()` stores the eligible contacts as recipients plus an e
 1. User has `broadcasts.send` (403 otherwise; route middleware + service check).
 2. Broadcast is still a draft (so it cannot be sent twice).
 3. `businesses.broadcasts_enabled` is true.
-4. WhatsApp: a valid Marketing template is configured (see below). Email: subject and body present, sender address configured.
+4. WhatsApp: a valid Marketing template is configured (see below), and the broadcast's campaign message fits it (present if the template has `broadcast_message`, absent if it has fixed wording). Email: subject and body present, sender address configured.
 5. At least one eligible recipient.
 6. Eligible count ≤ recipient limit. Otherwise refused outright: no recipients, no messages, no partial send.
 7. Eligible count equals the count the user confirmed on the review screen (`confirm_recipient_count`); if the audience changed, the user must review again.
@@ -195,14 +197,76 @@ Redis/Horizon uniqueness locks are only an optimisation.
 WHATSAPP_TEMPLATE_BROADCAST=<exact approved template name>
 WHATSAPP_TEMPLATE_BROADCAST_LANGUAGE=<exact language code, e.g. en>
 WHATSAPP_TEMPLATE_BROADCAST_ENABLED=true
-WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS=        # empty = no variables, or: contact_name
+WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS=        # empty = no variables, contact_name, or contact_name,broadcast_message
 ```
 
-`WhatsAppBroadcastTemplate::configured()` returns null (and `problem()` explains why) when disabled, no name, the name equals any configured transactional template (`quote_document`, `invoice_sent`, `invoice_reminder`, `payment_acknowledgement`, case-insensitive), or a parameter other than `contact_name` is listed. There is no fallback to a Utility template.
+`WhatsAppBroadcastTemplate::configured()` returns null (and `problem()` explains why) when disabled, no name, the name equals any configured transactional template (`quote_document`, `invoice_sent`, `invoice_reminder`, `payment_acknowledgement`, case-insensitive), a parameter other than `contact_name` / `broadcast_message` is listed, or a parameter is listed twice. There is no fallback to a Utility template.
 
 ADMAN cannot read the template category at send time; setting `ENABLED=true` is the operator's statement that WhatsApp Manager shows the template as **Approved** with category **Marketing**. Never set it for a template that is pending, rejected, or Utility.
 
 The send has no header and, when `PARAMETERS` is empty, no body component (adapter change: the body component is now only sent when there are parameters; transactional templates always have parameters, so they are unchanged). WhatsApp Marketing messages are charged per message by Meta and may be limited per customer (131049).
+
+## WhatsApp campaign message (Task 046)
+
+A WhatsApp broadcast can carry campaign-specific text in a second template variable:
+
+| Variable | ADMAN parameter | Source |
+| --- | --- | --- |
+| `{{1}}` | `contact_name` | `Contact.display_name` of each recipient (personalised) |
+| `{{2}}` | `broadcast_message` | `broadcasts.whatsapp_message`: one value per broadcast, identical for every recipient |
+
+**Status: implemented and deployed, not active.** Production still uses `raslordeck_broadcast` (`contact_name` only), which has fixed wording, so the Message field is not shown and a campaign message is refused. The feature becomes active only when the owner creates the template below, Meta approves it, and the configuration is switched (see Activation).
+
+### Template (`raslordeck_broadcast_v2`, to be created in WhatsApp Manager)
+
+Marketing, English (`en`), body only (no header, footer or buttons). Do not edit or delete `raslordeck_broadcast`.
+
+```
+Hello {{1}},
+
+We’re sharing an update from Raslordeck Limited.
+
+{{2}}
+
+Thank you for staying connected with us.
+```
+
+Sample values for Meta review: `{{1}}` = a contact name, `{{2}}` = "We have an important update to share with you."
+
+Read-only Meta check on 2026-10-03: `raslordeck_broadcast_v2` **does not exist** (neither pending nor approved). It was therefore not configured.
+
+### Behaviour
+
+- **Form:** when the configured template has `broadcast_message`, the WhatsApp section of the create/edit form shows a required plain-text **Message** field with a character counter (max **700**), and helper text explaining that the message is inserted into the approved template, the customer name is added automatically, and the same message goes to every recipient. No rich text, HTML, attachments or variables.
+- **Validation (server, `StoreBroadcastRequest`):**
+  - Template uses `broadcast_message`: `whatsapp_message` is required, a string, at most 700 characters (Meta caps a template body at 1024 characters; the rest is left for the fixed wording and the name), and must not contain `{{` or `}}`.
+  - Template has fixed wording: `whatsapp_message` is prohibited.
+  - No valid template: optional (the draft can be saved, but the template blocker prevents sending).
+  - The form checks the length and `{{`/`}}` on the client too. Whitespace-only input is rejected.
+- **Storage:** trimmed, line endings normalised to `\n`, saved on the broadcast. Email broadcasts always store null. Existing broadcasts (#1, #2) keep null and stay readable.
+- **Parameters:** `WhatsAppBroadcastTemplate::bodyParametersFor()` builds them server-side at queue time from the persisted Broadcast and Contact: exactly `[contact_name, broadcast_message]` (in the configured order). Nothing from the request reaches the parameters: extra fields such as `body_parameters` are ignored, and the send request only accepts `confirm_recipient_count`.
+- **Line breaks:** Meta rejects line breaks, tabs and long runs of spaces inside template variables, so each value is collapsed to single spaces (the same rule the delivery step already applied). Punctuation and Unicode are kept. The preview shows the collapsed text and says so.
+- **Conversation record:** the broadcast's `Message.body` adds `Campaign message: <text>` so staff can see what was sent; `meta.body_parameters` stores the exact values.
+- **Preview (Show page, drafts):** the message as received by a sample recipient (the first eligible contact, or "Customer name" if none), labelled as personalised name vs shared campaign message, next to the unchanged recipient count, exclusions and blockers.
+  - The fixed wording is the template's **approved** body text, read from WhatsApp Manager with `WhatsAppTemplateCatalog` (read-only GET, 5 s timeout, cached 10 minutes).
+  - If it cannot be read, the page lists the values that will be inserted instead.
+  - The lookup is display-only: it is not part of `preview()`/`start()` and never decides whether or what to send.
+- **Mismatch guard:** `WhatsAppBroadcastTemplate::problemFor()` blocks preview and start when the template needs a message and the draft has none, or the draft has a message but the template has fixed wording (it would be silently dropped). `processNextBatch` re-checks it, and stops the broadcast if the configuration changed mid-send.
+- **Editing:** unchanged lifecycle. Only drafts can be edited (edit page redirects, `update()` refuses under a row lock), so the campaign message cannot change once a broadcast is queued, sending or finished.
+- **Unchanged:** consent and eligibility, the 500 cap, `broadcasts.send`, the business switch, preview and confirmed count, cancellation, idempotency, batching, account-level failure handling, email broadcasts, and transactional templates (a Utility template name is still refused as the broadcast template, with any parameters).
+
+### Activation (owner, only after Meta shows `raslordeck_broadcast_v2` as Approved)
+
+1. Read-only Meta check: Approved, Marketing, `en`, body only, exactly `{{1}}` and `{{2}}`, wording as above.
+2. Server `.env` (backup first, mode 600):
+   ```
+   WHATSAPP_TEMPLATE_BROADCAST=raslordeck_broadcast_v2
+   WHATSAPP_TEMPLATE_BROADCAST_LANGUAGE=en
+   WHATSAPP_TEMPLATE_BROADCAST_ENABLED=true
+   WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS=contact_name,broadcast_message
+   ```
+3. Rebuild config cache (`adman:www-data` 640), reload PHP-FPM, restart Horizon. Verify the cached config and that a draft's preview renders both variables.
+4. Keep `broadcasts_enabled=false` until a campaign is deliberately sent. Old drafts without a message are blocked until a message is added.
 
 ### UAT Marketing template (Task 041, historical; replaced by `raslordeck_broadcast` in Task 045)
 
@@ -323,7 +387,7 @@ Broadcasts never read or write invoices, payments, claims, quotes, reminder rule
 
 ## Limitations / deferred
 
-- No scheduling, segmentation beyond the three audiences, templates with header media or buttons, per-recipient variables beyond `contact_name`, or resend of failed recipients.
+- No scheduling, segmentation beyond the three audiences, templates with header media or buttons, template variables beyond `contact_name` (per recipient) and `broadcast_message` (per broadcast), or resend of failed recipients.
 - WhatsApp template category/approval is not verified via the API at send time (operator assertion).
 - Turning `broadcasts_enabled` off blocks new sends (preview and start) but does not stop a broadcast that is already queued or sending. Use Cancel for that.
 - Email delivery status beyond "accepted by provider" (no Resend webhooks), so email recipients stop at `Sent`. The Resend email ID is not captured; ADMAN stores `laravel-mail-<message id>`.

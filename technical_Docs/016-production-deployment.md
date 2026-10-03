@@ -1352,6 +1352,28 @@ Health: `/up` and `/login` 200; `adman:production-check` and `--strict` exit 0; 
 
 No broadcast was created or sent.
 
+## Task 046 — WhatsApp broadcast campaign message (2026-10-03) — DEPLOYED, TEMPLATE NOT ACTIVATED
+
+Code `294116b`, deployed by CI (`tests` then `deploy-production`, both success). Details: `017-broadcasts.md` § WhatsApp campaign message.
+
+- **Migration:** `2026_10_02_130000_add_whatsapp_message_to_broadcasts` ran (nullable `broadcasts.whatsapp_message`). Existing broadcasts #1 and #2 keep null and stay readable.
+- **Meta (read-only, HTTP 200):** `raslordeck_broadcast_v2` does **not** exist (templates: `raslordeck_broadcast`, `broadcast_test`, the Utility templates, `hello_world`). The configuration switch was therefore **not** made.
+- **Configuration unchanged:** `.env` and cached config still `raslordeck_broadcast` / `en` / enabled / `contact_name`. `WhatsAppBroadcastTemplate` resolves to it with no problem and no campaign message (the Message field is hidden; a message is refused).
+- **New read-only Meta call:** the broadcast Show page now reads the configured template's approved body text (`GET /{WABA}/message_templates`, cached 10 min) to render the preview. Verified in production: the `raslordeck_broadcast` body is found and renders correctly. It never sends anything and is not part of the send path.
+- **Activation later (owner):** create `raslordeck_broadcast_v2` (Marketing, `en`, body only, `{{1}}` name, `{{2}}` message). After Meta approves it: back up `.env`, set `WHATSAPP_TEMPLATE_BROADCAST=raslordeck_broadcast_v2` and `WHATSAPP_TEMPLATE_BROADCAST_PARAMETERS=contact_name,broadcast_message` (language `en`, enabled `true`), rebuild the config cache (`adman:www-data` 640), reload PHP-FPM, restart Horizon, and verify. Keep `broadcasts_enabled=false`.
+
+**Data unchanged:**
+- `broadcasts_enabled = 0`; 2 broadcasts, 2 recipients.
+- Messages max ID 130; audit events max ID 379.
+- RCPT-00001 ₦1,000 confirmed; INV-00002 partially paid; 3 claims pending verification; QT-00001 issued.
+- The four transactional templates are unchanged (`quote_document`, `invoice_sent`, `invoice_reminder`, `payment_acknowledgement`: `en`, enabled).
+
+Tests: `BroadcastTest` 58/58 (17 new); full suite 359 tests, 357 passed, 2 skipped, 1,849 assertions; `npm run build` succeeds; type-check error count unchanged (33, pre-existing, none in broadcast files).
+
+Health: `/up` 200; `adman:production-check` and `--strict` exit 0; database, Redis and queue ok; Horizon running; scheduler timer active; failed jobs 0; 0 `laravel.log` errors today.
+
+No broadcast was created or sent.
+
 ---
 
 ## Approval reminders (from Task 016)
