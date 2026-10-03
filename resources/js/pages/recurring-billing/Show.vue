@@ -14,6 +14,8 @@ type ScheduleDetail = {
     end_date: string | null;
     next_generation_date: string | null;
     payment_term_days: number;
+    delivery_channel: string;
+    delivery_channel_label: string;
     currency_code: string;
     discount_type: string;
     discount_type_label: string;
@@ -57,6 +59,25 @@ type GenerationRow = {
     attempted_at: string | null;
     completed_at: string | null;
     invoice: { id: number; number: string } | null;
+    delivery_channel: string | null;
+    delivery_channel_label: string | null;
+    document: { id: number; filename: string; download_url: string } | null;
+    pdf_failure_reason: string | null;
+    deliveries: Array<{
+        id: number;
+        channel: string;
+        channel_label: string;
+        status: string;
+        status_label: string;
+        failure_reason: string | null;
+        queued_at: string | null;
+        message: {
+            id: number;
+            status: string;
+            status_label: string;
+            failure_reason: string | null;
+        } | null;
+    }>;
     can_retry: boolean;
 };
 
@@ -82,8 +103,12 @@ defineOptions({
 });
 
 const page = usePage();
-const flashSuccess = computed(() => page.props.flash?.success as string | undefined);
-const flashError = computed(() => page.props.flash?.error as string | undefined);
+const flashSuccess = computed(
+    () => page.props.flash?.success as string | undefined,
+);
+const flashError = computed(
+    () => page.props.flash?.error as string | undefined,
+);
 
 const formatMoney = (amount: string) =>
     `${props.schedule.currency_code} ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -110,14 +135,17 @@ const postAction = (path: string, confirmMessage?: string) => {
                         {{ schedule.status_label }}
                     </span>
                     <span class="text-sm text-muted-foreground">
-                        {{ schedule.frequency_label }} · {{ formatMoney(schedule.total) }}
+                        {{ schedule.frequency_label }} ·
+                        {{ formatMoney(schedule.total) }}
                     </span>
                 </div>
             </div>
 
             <div class="flex flex-wrap gap-2">
                 <Button v-if="permissions.update" variant="secondary" as-child>
-                    <Link :href="`/recurring-billing/${schedule.id}/edit`">Edit</Link>
+                    <Link :href="`/recurring-billing/${schedule.id}/edit`"
+                        >Edit</Link
+                    >
                 </Button>
                 <Button
                     v-if="permissions.generate"
@@ -191,8 +219,9 @@ const postAction = (path: string, confirmMessage?: string) => {
         <section class="neo-surface space-y-3 border-amber-500/30 p-5">
             <h2 class="text-sm font-semibold">Independent invoices</h2>
             <p class="text-sm text-muted-foreground">
-                Each generation creates a normal issued invoice. Editing, pausing, or cancelling this
-                schedule does not change invoices that were already generated.
+                Each generation creates a normal issued invoice. Editing,
+                pausing, or cancelling this schedule does not change invoices
+                that were already generated.
             </p>
         </section>
 
@@ -201,11 +230,17 @@ const postAction = (path: string, confirmMessage?: string) => {
                 <h2 class="text-sm font-semibold">Line items</h2>
                 <div class="overflow-x-auto">
                     <table class="w-full min-w-[560px] text-sm">
-                        <thead class="border-b border-border text-left text-muted-foreground">
+                        <thead
+                            class="border-b border-border text-left text-muted-foreground"
+                        >
                             <tr>
-                                <th class="py-2 pr-3 font-medium">Description</th>
+                                <th class="py-2 pr-3 font-medium">
+                                    Description
+                                </th>
                                 <th class="py-2 pr-3 font-medium">Qty</th>
-                                <th class="py-2 pr-3 font-medium">Unit price</th>
+                                <th class="py-2 pr-3 font-medium">
+                                    Unit price
+                                </th>
                                 <th class="py-2 font-medium">Line total</th>
                             </tr>
                         </thead>
@@ -217,13 +252,20 @@ const postAction = (path: string, confirmMessage?: string) => {
                             >
                                 <td class="py-2 pr-3">
                                     {{ item.description }}
-                                    <span v-if="item.unit" class="text-muted-foreground">
+                                    <span
+                                        v-if="item.unit"
+                                        class="text-muted-foreground"
+                                    >
                                         ({{ item.unit }})
                                     </span>
                                 </td>
                                 <td class="py-2 pr-3">{{ item.quantity }}</td>
-                                <td class="py-2 pr-3">{{ formatMoney(item.unit_price) }}</td>
-                                <td class="py-2">{{ formatMoney(item.line_subtotal) }}</td>
+                                <td class="py-2 pr-3">
+                                    {{ formatMoney(item.unit_price) }}
+                                </td>
+                                <td class="py-2">
+                                    {{ formatMoney(item.line_subtotal) }}
+                                </td>
                             </tr>
                         </tbody>
                     </table>
@@ -248,11 +290,17 @@ const postAction = (path: string, confirmMessage?: string) => {
                     </div>
                     <div class="flex justify-between gap-4">
                         <dt class="text-muted-foreground">
-                            Tax{{ schedule.tax_enabled ? ` (${schedule.tax_rate}%)` : '' }}
+                            Tax{{
+                                schedule.tax_enabled
+                                    ? ` (${schedule.tax_rate}%)`
+                                    : ''
+                            }}
                         </dt>
                         <dd>{{ formatMoney(schedule.tax_amount) }}</dd>
                     </div>
-                    <div class="flex justify-between gap-4 border-t border-border pt-2 font-medium">
+                    <div
+                        class="flex justify-between gap-4 border-t border-border pt-2 font-medium"
+                    >
                         <dt>Total</dt>
                         <dd>{{ formatMoney(schedule.total) }}</dd>
                     </div>
@@ -302,6 +350,10 @@ const postAction = (path: string, confirmMessage?: string) => {
                         <dt class="text-muted-foreground">Payment term</dt>
                         <dd>{{ schedule.payment_term_days }} days</dd>
                     </div>
+                    <div class="flex justify-between gap-4">
+                        <dt class="text-muted-foreground">Invoice delivery</dt>
+                        <dd>{{ schedule.delivery_channel_label }}</dd>
+                    </div>
                 </dl>
             </section>
 
@@ -311,13 +363,17 @@ const postAction = (path: string, confirmMessage?: string) => {
             >
                 <div v-if="schedule.notes" class="space-y-1">
                     <h2 class="text-sm font-semibold">Notes</h2>
-                    <p class="whitespace-pre-wrap text-sm text-muted-foreground">
+                    <p
+                        class="text-sm whitespace-pre-wrap text-muted-foreground"
+                    >
                         {{ schedule.notes }}
                     </p>
                 </div>
                 <div v-if="schedule.terms" class="space-y-1">
                     <h2 class="text-sm font-semibold">Terms</h2>
-                    <p class="whitespace-pre-wrap text-sm text-muted-foreground">
+                    <p
+                        class="text-sm whitespace-pre-wrap text-muted-foreground"
+                    >
                         {{ schedule.terms }}
                     </p>
                 </div>
@@ -326,19 +382,29 @@ const postAction = (path: string, confirmMessage?: string) => {
             <section class="neo-surface space-y-3 p-5 lg:col-span-3">
                 <h2 class="text-sm font-semibold">Generation history</h2>
                 <p class="text-xs text-muted-foreground">
-                    Successful runs link to the independent invoice that was created.
+                    Successful runs link to the independent invoice that was
+                    created. Delivery status is shown per channel; a delivery
+                    problem never affects the invoice itself.
                 </p>
-                <div v-if="generations.length === 0" class="text-sm text-muted-foreground">
+                <div
+                    v-if="generations.length === 0"
+                    class="text-sm text-muted-foreground"
+                >
                     No generations yet.
                 </div>
                 <div v-else class="overflow-x-auto">
-                    <table class="w-full min-w-[720px] text-sm">
-                        <thead class="border-b border-border text-left text-muted-foreground">
+                    <table class="w-full min-w-[880px] text-sm">
+                        <thead
+                            class="border-b border-border text-left text-muted-foreground"
+                        >
                             <tr>
                                 <th class="py-2 pr-3 font-medium">Period</th>
                                 <th class="py-2 pr-3 font-medium">Status</th>
                                 <th class="py-2 pr-3 font-medium">Trigger</th>
                                 <th class="py-2 pr-3 font-medium">Invoice</th>
+                                <th class="py-2 pr-3 font-medium">
+                                    PDF & delivery
+                                </th>
                                 <th class="py-2 font-medium">Actions</th>
                             </tr>
                         </thead>
@@ -349,9 +415,12 @@ const postAction = (path: string, confirmMessage?: string) => {
                                 class="border-b border-border/60 last:border-0"
                             >
                                 <td class="py-2 pr-3">
-                                    <p class="font-medium">{{ generation.period_key }}</p>
+                                    <p class="font-medium">
+                                        {{ generation.period_key }}
+                                    </p>
                                     <p class="text-xs text-muted-foreground">
-                                        {{ generation.period_start }} → {{ generation.period_end }}
+                                        {{ generation.period_start }} →
+                                        {{ generation.period_end }}
                                     </p>
                                 </td>
                                 <td class="py-2 pr-3">
@@ -374,11 +443,90 @@ const postAction = (path: string, confirmMessage?: string) => {
                                     >
                                         {{ generation.invoice.number }}
                                     </Link>
-                                    <span v-else class="text-muted-foreground">—</span>
+                                    <span v-else class="text-muted-foreground"
+                                        >—</span
+                                    >
+                                </td>
+                                <td class="py-2 pr-3">
+                                    <template v-if="generation.invoice">
+                                        <a
+                                            v-if="generation.document"
+                                            :href="
+                                                generation.document.download_url
+                                            "
+                                            class="text-xs font-medium underline-offset-4 hover:underline"
+                                        >
+                                            PDF
+                                        </a>
+                                        <p
+                                            v-else-if="
+                                                generation.pdf_failure_reason
+                                            "
+                                            class="text-xs text-destructive"
+                                        >
+                                            PDF failed:
+                                            {{ generation.pdf_failure_reason }}
+                                        </p>
+                                        <p
+                                            v-else
+                                            class="text-xs text-muted-foreground"
+                                        >
+                                            PDF pending
+                                        </p>
+                                        <p
+                                            class="mt-0.5 text-xs text-muted-foreground"
+                                        >
+                                            Delivery:
+                                            {{
+                                                generation.delivery_channel_label ??
+                                                'Not configured'
+                                            }}
+                                        </p>
+                                        <p
+                                            v-for="delivery in generation.deliveries"
+                                            :key="delivery.id"
+                                            class="text-xs"
+                                            :class="
+                                                delivery.status ===
+                                                    'not_deliverable' ||
+                                                delivery.message?.status ===
+                                                    'failed'
+                                                    ? 'text-destructive'
+                                                    : 'text-muted-foreground'
+                                            "
+                                        >
+                                            {{ delivery.channel_label }}:
+                                            {{
+                                                delivery.message
+                                                    ?.status_label ??
+                                                delivery.status_label
+                                            }}
+                                            <span
+                                                v-if="
+                                                    delivery.failure_reason ||
+                                                    delivery.message
+                                                        ?.failure_reason
+                                                "
+                                            >
+                                                —
+                                                {{
+                                                    delivery.failure_reason ??
+                                                    delivery.message
+                                                        ?.failure_reason
+                                                }}
+                                            </span>
+                                        </p>
+                                    </template>
+                                    <span v-else class="text-muted-foreground"
+                                        >—</span
+                                    >
                                 </td>
                                 <td class="py-2">
                                     <Button
-                                        v-if="permissions.generate && generation.can_retry"
+                                        v-if="
+                                            permissions.generate &&
+                                            generation.can_retry
+                                        "
                                         type="button"
                                         variant="secondary"
                                         size="sm"

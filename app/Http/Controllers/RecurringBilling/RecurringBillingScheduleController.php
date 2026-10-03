@@ -4,6 +4,7 @@ namespace App\Http\Controllers\RecurringBilling;
 
 use App\Enums\ContactStatus;
 use App\Enums\DiscountType;
+use App\Enums\RecurringBillingDeliveryChannel;
 use App\Enums\RecurringBillingFrequency;
 use App\Enums\RecurringBillingGenerationStatus;
 use App\Enums\RecurringBillingStatus;
@@ -12,6 +13,7 @@ use App\Http\Requests\RecurringBilling\StoreRecurringBillingScheduleRequest;
 use App\Http\Requests\RecurringBilling\UpdateRecurringBillingScheduleRequest;
 use App\Models\Business;
 use App\Models\Contact;
+use App\Models\RecurringBillingDelivery;
 use App\Models\RecurringBillingGeneration;
 use App\Models\RecurringBillingItem;
 use App\Models\RecurringBillingSchedule;
@@ -79,6 +81,7 @@ class RecurringBillingScheduleController extends Controller
             'customers' => $this->customerOptions(),
             'frequencyOptions' => $this->frequencyOptions(),
             'discountTypeOptions' => $this->discountTypeOptions(),
+            'deliveryChannelOptions' => $this->deliveryChannelOptions(),
             'defaults' => $this->formDefaults(),
         ]);
     }
@@ -111,7 +114,9 @@ class RecurringBillingScheduleController extends Controller
         $schedule->load([
             'items',
             'contact',
-            'generations' => fn ($q) => $q->with('invoice:id,number')->orderByDesc('id'),
+            'generations' => fn ($q) => $q
+                ->with(['invoice:id,number', 'document:id,filename', 'deliveries.message:id,status,external_message_id,failure_reason'])
+                ->orderByDesc('id'),
         ]);
 
         $user = auth()->user();
@@ -133,6 +138,31 @@ class RecurringBillingScheduleController extends Controller
                 'invoice' => $generation->invoice
                     ? ['id' => $generation->invoice->id, 'number' => $generation->invoice->number]
                     : null,
+                'delivery_channel' => $generation->delivery_channel?->value,
+                'delivery_channel_label' => $generation->delivery_channel?->label(),
+                'document' => $generation->document ? [
+                    'id' => $generation->document->id,
+                    'filename' => $generation->document->filename,
+                    'download_url' => route('documents.download', $generation->document),
+                ] : null,
+                'pdf_failure_reason' => $generation->pdf_failure_reason,
+                'deliveries' => $generation->deliveries
+                    ->sortBy(fn (RecurringBillingDelivery $delivery) => $delivery->channel->value)
+                    ->map(fn (RecurringBillingDelivery $delivery) => [
+                        'id' => $delivery->id,
+                        'channel' => $delivery->channel->value,
+                        'channel_label' => $delivery->channel->label(),
+                        'status' => $delivery->status->value,
+                        'status_label' => $delivery->status->label(),
+                        'failure_reason' => $delivery->failure_reason,
+                        'queued_at' => $delivery->queued_at?->toIso8601String(),
+                        'message' => $delivery->message ? [
+                            'id' => $delivery->message->id,
+                            'status' => $delivery->message->status->value,
+                            'status_label' => $delivery->message->status->label(),
+                            'failure_reason' => $delivery->message->failure_reason,
+                        ] : null,
+                    ])->values()->all(),
                 'can_retry' => in_array($generation->status, [
                     RecurringBillingGenerationStatus::Failed,
                     RecurringBillingGenerationStatus::Skipped,
@@ -171,6 +201,7 @@ class RecurringBillingScheduleController extends Controller
             'customers' => $this->customerOptions(),
             'frequencyOptions' => $this->frequencyOptions(),
             'discountTypeOptions' => $this->discountTypeOptions(),
+            'deliveryChannelOptions' => $this->deliveryChannelOptions(),
         ]);
     }
 
@@ -315,6 +346,8 @@ class RecurringBillingScheduleController extends Controller
         return [
             ...$this->listPayload($schedule),
             'payment_term_days' => $schedule->payment_term_days,
+            'delivery_channel' => $schedule->delivery_channel->value,
+            'delivery_channel_label' => $schedule->delivery_channel->label(),
             'discount_type' => $schedule->discount_type->value,
             'discount_type_label' => $schedule->discount_type->label(),
             'discount_value' => $schedule->discount_value,
@@ -346,6 +379,7 @@ class RecurringBillingScheduleController extends Controller
                 'display_name' => $schedule->contact->display_name,
                 'email' => $schedule->contact->email,
                 'phone' => $schedule->contact->phone,
+                'whatsapp_opt_in' => (bool) $schedule->contact->whatsapp_opt_in,
                 'status' => $schedule->contact->status->value,
                 'status_label' => $schedule->contact->status->label(),
             ] : null,
@@ -398,7 +432,7 @@ class RecurringBillingScheduleController extends Controller
     }
 
     /**
-     * @return list<array{id: int, display_name: string, email: string|null}>
+     * @return list<array{id: int, display_name: string, email: string|null, whatsapp_opt_in: bool}>
      */
     private function customerOptions(): array
     {
@@ -407,11 +441,12 @@ class RecurringBillingScheduleController extends Controller
             ->where('status', ContactStatus::Customer)
             ->orderBy('display_name')
             ->limit(300)
-            ->get(['id', 'display_name', 'email'])
+            ->get(['id', 'display_name', 'email', 'whatsapp_opt_in'])
             ->map(fn (Contact $contact) => [
                 'id' => $contact->id,
                 'display_name' => $contact->display_name,
                 'email' => $contact->email,
+                'whatsapp_opt_in' => (bool) $contact->whatsapp_opt_in,
             ])
             ->all();
     }
@@ -439,6 +474,17 @@ class RecurringBillingScheduleController extends Controller
     }
 
     /**
+     * @return list<array{value: string, label: string}>
+     */
+    private function deliveryChannelOptions(): array
+    {
+        return collect(RecurringBillingDeliveryChannel::cases())->map(fn (RecurringBillingDeliveryChannel $c) => [
+            'value' => $c->value,
+            'label' => $c->label(),
+        ])->all();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function formDefaults(): array
@@ -449,6 +495,7 @@ class RecurringBillingScheduleController extends Controller
             'frequency' => RecurringBillingFrequency::Monthly->value,
             'start_date' => now()->toDateString(),
             'payment_term_days' => (int) ($business->default_payment_term_days ?: 14),
+            'delivery_channel' => RecurringBillingDeliveryChannel::None->value,
             'discount_type' => DiscountType::None->value,
             'discount_value' => '0',
             'tax_enabled' => (bool) $business->tax_enabled,

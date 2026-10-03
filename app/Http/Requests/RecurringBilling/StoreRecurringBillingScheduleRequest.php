@@ -3,6 +3,7 @@
 namespace App\Http\Requests\RecurringBilling;
 
 use App\Enums\DiscountType;
+use App\Enums\RecurringBillingDeliveryChannel;
 use App\Enums\RecurringBillingFrequency;
 use App\Support\Permissions;
 use Illuminate\Foundation\Http\FormRequest;
@@ -26,6 +27,7 @@ class StoreRecurringBillingScheduleRequest extends FormRequest
             'start_date' => ['required', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'payment_term_days' => ['required', 'integer', 'min:0', 'max:365'],
+            'delivery_channel' => ['sometimes', 'required', Rule::enum(RecurringBillingDeliveryChannel::class)],
             'discount_type' => ['required', Rule::enum(DiscountType::class)],
             'discount_value' => ['nullable', 'numeric', 'min:0'],
             'tax_enabled' => ['sometimes', 'boolean'],

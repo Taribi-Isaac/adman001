@@ -36,7 +36,8 @@ use Illuminate\Validation\ValidationException;
 /**
  * Queues and delivers outbound document emails through the Communication domain.
  *
- * Recurring invoice generation must NOT call this service automatically.
+ * Recurring invoices reach this service only through RecurringInvoiceDeliveryService, after the
+ * invoice is committed and only for schedules whose delivery channel includes email.
  */
 class EmailOutboundService
 {
@@ -170,7 +171,7 @@ class EmailOutboundService
         );
     }
 
-    public function queueInvoiceEmail(Invoice $invoice, User $actor): Message
+    public function queueInvoiceEmail(Invoice $invoice, User $actor, MessageActorType $actorType = MessageActorType::Staff): Message
     {
         if ($invoice->lifecycle_status === InvoiceLifecycleStatus::Draft) {
             throw ValidationException::withMessages([
@@ -193,6 +194,7 @@ class EmailOutboundService
             documentType: DocumentType::InvoicePdf,
             actor: $actor,
             ensureDocument: fn () => $this->documents->generateInvoicePdf($invoice, $actor, true)['document'],
+            actorType: $actorType,
         );
     }
 
@@ -491,7 +493,7 @@ class EmailOutboundService
             return $message;
         });
 
-        SendOutboundEmailJob::dispatch($message->id);
+        SendOutboundEmailJob::dispatch($message->id)->afterCommit();
 
         $this->auditLogger->record(
             event: 'email.queued',

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\DiscountType;
+use App\Enums\RecurringBillingDeliveryChannel;
 use App\Enums\RecurringBillingFrequency;
 use App\Enums\RecurringBillingStatus;
 use Database\Factories\RecurringBillingScheduleFactory;
@@ -24,6 +25,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $next_generation_date
  * @property RecurringBillingStatus $status
  * @property int $payment_term_days
+ * @property RecurringBillingDeliveryChannel $delivery_channel
  * @property string $currency_code
  * @property DiscountType $discount_type
  * @property string $discount_value
@@ -50,6 +52,7 @@ class RecurringBillingSchedule extends Model
         'next_generation_date',
         'status',
         'payment_term_days',
+        'delivery_channel',
         'currency_code',
         'discount_type',
         'discount_value',
@@ -74,6 +77,7 @@ class RecurringBillingSchedule extends Model
             'end_date' => 'date',
             'next_generation_date' => 'date',
             'status' => RecurringBillingStatus::class,
+            'delivery_channel' => RecurringBillingDeliveryChannel::class,
             'discount_type' => DiscountType::class,
             'discount_value' => 'decimal:4',
             'tax_enabled' => 'boolean',

@@ -8,17 +8,29 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
-type Customer = { id: number; display_name: string; email: string | null };
-type LineItem = { description: string; quantity: string; unit_price: string; unit: string };
+type Customer = {
+    id: number;
+    display_name: string;
+    email: string | null;
+    whatsapp_opt_in: boolean;
+};
+type LineItem = {
+    description: string;
+    quantity: string;
+    unit_price: string;
+    unit: string;
+};
 
 const props = defineProps<{
     customers: Customer[];
     frequencyOptions: Array<{ value: string; label: string }>;
     discountTypeOptions: Array<{ value: string; label: string }>;
+    deliveryChannelOptions: Array<{ value: string; label: string }>;
     defaults: {
         frequency: string;
         start_date: string;
         payment_term_days: number;
+        delivery_channel: string;
         discount_type: string;
         discount_value: string;
         tax_enabled: boolean;
@@ -50,6 +62,7 @@ const form = useForm({
     start_date: props.defaults.start_date,
     end_date: '',
     payment_term_days: props.defaults.payment_term_days,
+    delivery_channel: props.defaults.delivery_channel,
     discount_type: props.defaults.discount_type,
     discount_value: props.defaults.discount_value,
     tax_enabled: props.defaults.tax_enabled,
@@ -95,6 +108,39 @@ const preview = computed(() => {
 const formatMoney = (amount: number) =>
     `${props.defaults.currency_code} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+const selectedCustomer = computed(
+    () =>
+        props.customers.find((customer) => customer.id === form.contact_id) ??
+        null,
+);
+
+const deliveryHint = computed(() => {
+    if (form.delivery_channel === 'none') {
+        return 'The invoice PDF is generated automatically but not sent. Send it manually from the invoice.';
+    }
+
+    const missing: string[] = [];
+    const usesEmail =
+        form.delivery_channel === 'email' || form.delivery_channel === 'both';
+    const usesWhatsApp =
+        form.delivery_channel === 'whatsapp' ||
+        form.delivery_channel === 'both';
+
+    if (usesEmail && !selectedCustomer.value?.email) {
+        missing.push('an email address');
+    }
+
+    if (usesWhatsApp && !selectedCustomer.value?.whatsapp_opt_in) {
+        missing.push('WhatsApp opt-in');
+    }
+
+    if (missing.length > 0) {
+        return `This customer needs ${missing.join(' and ')} for this delivery option.`;
+    }
+
+    return 'Each generated invoice is sent automatically with its PDF after it is created. WhatsApp follows the 24-hour window and approved template rules.';
+});
+
 const submit = () => {
     form.post('/recurring-billing');
 };
@@ -109,7 +155,10 @@ const submit = () => {
             description="Configure line items and cadence. Each run creates an ordinary invoice that is independent of this schedule."
         />
 
-        <form class="mx-auto w-full max-w-4xl space-y-6" @submit.prevent="submit">
+        <form
+            class="mx-auto w-full max-w-4xl space-y-6"
+            @submit.prevent="submit"
+        >
             <section class="neo-surface space-y-4 p-5">
                 <h2 class="text-sm font-semibold">Customer & schedule</h2>
                 <div class="grid gap-4 sm:grid-cols-2">
@@ -128,12 +177,18 @@ const submit = () => {
                                 :value="customer.id"
                             >
                                 {{ customer.display_name
-                                }}{{ customer.email ? ` (${customer.email})` : '' }}
+                                }}{{
+                                    customer.email ? ` (${customer.email})` : ''
+                                }}
                             </option>
                         </select>
                         <InputError :message="form.errors.contact_id" />
-                        <p v-if="customers.length === 0" class="text-xs text-muted-foreground">
-                            No customers available. Promote a contact to Customer first.
+                        <p
+                            v-if="customers.length === 0"
+                            class="text-xs text-muted-foreground"
+                        >
+                            No customers available. Promote a contact to
+                            Customer first.
                         </p>
                     </div>
                     <div class="space-y-2">
@@ -155,7 +210,9 @@ const submit = () => {
                         <InputError :message="form.errors.frequency" />
                     </div>
                     <div class="space-y-2">
-                        <Label for="payment_term_days">Payment term (days)</Label>
+                        <Label for="payment_term_days"
+                            >Payment term (days)</Label
+                        >
                         <Input
                             id="payment_term_days"
                             v-model="form.payment_term_days"
@@ -168,14 +225,46 @@ const submit = () => {
                     </div>
                     <div class="space-y-2">
                         <Label for="start_date">Start date</Label>
-                        <Input id="start_date" v-model="form.start_date" type="date" required />
+                        <Input
+                            id="start_date"
+                            v-model="form.start_date"
+                            type="date"
+                            required
+                        />
                         <InputError :message="form.errors.start_date" />
                     </div>
                     <div class="space-y-2">
                         <Label for="end_date">End date</Label>
-                        <Input id="end_date" v-model="form.end_date" type="date" />
-                        <p class="text-xs text-muted-foreground">Optional. Leave blank for ongoing.</p>
+                        <Input
+                            id="end_date"
+                            v-model="form.end_date"
+                            type="date"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                            Optional. Leave blank for ongoing.
+                        </p>
                         <InputError :message="form.errors.end_date" />
+                    </div>
+                    <div class="space-y-2 sm:col-span-2">
+                        <Label for="delivery_channel">Invoice delivery</Label>
+                        <select
+                            id="delivery_channel"
+                            v-model="form.delivery_channel"
+                            class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                            required
+                        >
+                            <option
+                                v-for="option in deliveryChannelOptions"
+                                :key="option.value"
+                                :value="option.value"
+                            >
+                                {{ option.label }}
+                            </option>
+                        </select>
+                        <p class="text-xs text-muted-foreground">
+                            {{ deliveryHint }}
+                        </p>
+                        <InputError :message="form.errors.delivery_channel" />
                     </div>
                 </div>
             </section>
@@ -183,7 +272,9 @@ const submit = () => {
             <section class="neo-surface space-y-4 p-5">
                 <div class="flex items-center justify-between gap-2">
                     <h2 class="text-sm font-semibold">Line items</h2>
-                    <Button type="button" variant="secondary" @click="addItem">Add line</Button>
+                    <Button type="button" variant="secondary" @click="addItem"
+                        >Add line</Button
+                    >
                 </div>
                 <div
                     v-for="(item, index) in form.items"
@@ -192,7 +283,11 @@ const submit = () => {
                 >
                     <div class="space-y-2 sm:col-span-5">
                         <Label :for="`desc-${index}`">Description</Label>
-                        <Input :id="`desc-${index}`" v-model="item.description" required />
+                        <Input
+                            :id="`desc-${index}`"
+                            v-model="item.description"
+                            required
+                        />
                     </div>
                     <div class="space-y-2 sm:col-span-2">
                         <Label :for="`qty-${index}`">Qty</Label>
@@ -218,7 +313,11 @@ const submit = () => {
                     </div>
                     <div class="space-y-2 sm:col-span-2">
                         <Label :for="`unit-${index}`">Unit</Label>
-                        <Input :id="`unit-${index}`" v-model="item.unit" placeholder="optional" />
+                        <Input
+                            :id="`unit-${index}`"
+                            v-model="item.unit"
+                            placeholder="optional"
+                        />
                     </div>
                     <div class="flex items-end sm:col-span-1">
                         <Button
@@ -275,7 +374,9 @@ const submit = () => {
                             :disabled="!form.tax_enabled"
                         />
                     </div>
-                    <label class="flex items-center gap-2 text-sm sm:col-span-3">
+                    <label
+                        class="flex items-center gap-2 text-sm sm:col-span-3"
+                    >
                         <input
                             v-model="form.tax_enabled"
                             type="checkbox"
@@ -303,8 +404,8 @@ const submit = () => {
             <section class="neo-surface space-y-3 p-5">
                 <h2 class="text-sm font-semibold">Totals preview</h2>
                 <p class="text-xs text-muted-foreground">
-                    Preview of each generated invoice. Final totals are calculated when an invoice is
-                    created.
+                    Preview of each generated invoice. Final totals are
+                    calculated when an invoice is created.
                 </p>
                 <dl class="grid gap-2 text-sm sm:grid-cols-2">
                     <div class="flex justify-between gap-4 sm:block">
@@ -319,7 +420,9 @@ const submit = () => {
                         <dt class="text-muted-foreground">Tax</dt>
                         <dd>{{ formatMoney(preview.tax) }}</dd>
                     </div>
-                    <div class="flex justify-between gap-4 font-medium sm:block">
+                    <div
+                        class="flex justify-between gap-4 font-medium sm:block"
+                    >
                         <dt>Total</dt>
                         <dd>{{ formatMoney(preview.total) }}</dd>
                     </div>
@@ -330,7 +433,10 @@ const submit = () => {
                 <Button type="button" variant="secondary" as-child>
                     <Link href="/recurring-billing">Cancel</Link>
                 </Button>
-                <Button type="submit" :disabled="form.processing || customers.length === 0">
+                <Button
+                    type="submit"
+                    :disabled="form.processing || customers.length === 0"
+                >
                     {{ form.processing ? 'Saving…' : 'Create schedule' }}
                 </Button>
             </div>

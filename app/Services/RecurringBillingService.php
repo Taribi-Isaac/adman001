@@ -2,19 +2,26 @@
 
 namespace App\Services;
 
+use App\Enums\CommunicationChannel;
 use App\Enums\DiscountType;
+use App\Enums\RecurringBillingDeliveryChannel;
 use App\Enums\RecurringBillingFrequency;
 use App\Enums\RecurringBillingGenerationStatus;
 use App\Enums\RecurringBillingStatus;
+use App\Jobs\DeliverRecurringInvoice;
 use App\Models\Business;
 use App\Models\Contact;
 use App\Models\RecurringBillingGeneration;
 use App\Models\RecurringBillingItem;
 use App\Models\RecurringBillingSchedule;
 use App\Models\User;
+use App\Support\DocumentCalculator;
 use App\Support\DocumentSnapshots;
+use App\Support\Money;
 use App\Support\RecurringBillingCalendar;
+use App\Support\WhatsAppPhone;
 use Carbon\CarbonInterface;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -38,7 +45,17 @@ class RecurringBillingService
         $business = Business::current();
         $this->assertItems($items);
 
-        return DB::transaction(function () use ($data, $items, $actor, $contact, $business) {
+        $deliveryChannel = RecurringBillingDeliveryChannel::from((string) ($data['delivery_channel'] ?? RecurringBillingDeliveryChannel::None->value));
+        $this->assertDeliverable($contact, $deliveryChannel);
+        $this->assertBillable(
+            $items,
+            DiscountType::from((string) ($data['discount_type'] ?? DiscountType::None->value)),
+            $data['discount_value'] ?? '0',
+            array_key_exists('tax_enabled', $data) ? (bool) $data['tax_enabled'] : (bool) $business->tax_enabled,
+            $data['tax_rate'] ?? $business->tax_rate,
+        );
+
+        return DB::transaction(function () use ($data, $items, $actor, $contact, $business, $deliveryChannel) {
             $start = $data['start_date'];
             $frequency = RecurringBillingFrequency::from((string) $data['frequency']);
 
@@ -51,6 +68,7 @@ class RecurringBillingService
                 'next_generation_date' => $start,
                 'status' => RecurringBillingStatus::Active,
                 'payment_term_days' => (int) ($data['payment_term_days'] ?? $business->default_payment_term_days ?: 14),
+                'delivery_channel' => $deliveryChannel,
                 'currency_code' => $business->currency_code,
                 'discount_type' => DiscountType::from((string) ($data['discount_type'] ?? DiscountType::None->value)),
                 'discount_value' => $data['discount_value'] ?? '0',
@@ -75,6 +93,7 @@ class RecurringBillingService
                     'frequency' => $schedule->frequency->value,
                     'start_date' => $schedule->start_date?->toDateString(),
                     'next_generation_date' => $schedule->next_generation_date?->toDateString(),
+                    'delivery_channel' => $schedule->delivery_channel->value,
                 ],
                 actor: $actor,
             );
@@ -98,8 +117,19 @@ class RecurringBillingService
         $contact = $this->requireCustomer((int) ($data['contact_id'] ?? $schedule->contact_id));
         $this->assertItems($items);
 
-        return DB::transaction(function () use ($schedule, $data, $items, $actor, $contact) {
+        $deliveryChannel = RecurringBillingDeliveryChannel::from((string) ($data['delivery_channel'] ?? $schedule->delivery_channel->value));
+        $this->assertDeliverable($contact, $deliveryChannel);
+        $this->assertBillable(
+            $items,
+            DiscountType::from((string) ($data['discount_type'] ?? $schedule->discount_type->value)),
+            $data['discount_value'] ?? $schedule->discount_value,
+            array_key_exists('tax_enabled', $data) ? (bool) $data['tax_enabled'] : $schedule->tax_enabled,
+            array_key_exists('tax_rate', $data) ? $data['tax_rate'] : $schedule->tax_rate,
+        );
+
+        return DB::transaction(function () use ($schedule, $data, $items, $actor, $contact, $deliveryChannel) {
             $old = [
+                'delivery_channel' => $schedule->delivery_channel->value,
                 'discount_type' => $schedule->discount_type->value,
                 'discount_value' => $schedule->discount_value,
                 'payment_term_days' => $schedule->payment_term_days,
@@ -112,6 +142,7 @@ class RecurringBillingService
                 'frequency' => RecurringBillingFrequency::from((string) ($data['frequency'] ?? $schedule->frequency->value)),
                 'end_date' => array_key_exists('end_date', $data) ? $data['end_date'] : $schedule->end_date,
                 'payment_term_days' => (int) ($data['payment_term_days'] ?? $schedule->payment_term_days),
+                'delivery_channel' => $deliveryChannel,
                 'discount_type' => DiscountType::from((string) ($data['discount_type'] ?? $schedule->discount_type->value)),
                 'discount_value' => $data['discount_value'] ?? $schedule->discount_value,
                 'tax_enabled' => array_key_exists('tax_enabled', $data)
@@ -133,6 +164,7 @@ class RecurringBillingService
                 auditable: $schedule,
                 oldValues: $old,
                 newValues: [
+                    'delivery_channel' => $schedule->delivery_channel->value,
                     'discount_type' => $schedule->discount_type->value,
                     'discount_value' => $schedule->discount_value,
                     'payment_term_days' => $schedule->payment_term_days,
@@ -279,8 +311,10 @@ class RecurringBillingService
         $period = $claim['period'];
         $generationDate = $claim['generation_date'];
 
+        $generatedNow = false;
+
         try {
-            return DB::transaction(function () use ($generation, $locked, $period, $generationDate, $actor) {
+            $result = DB::transaction(function () use ($generation, $locked, $period, $generationDate, $actor, &$generatedNow) {
                 $generation = RecurringBillingGeneration::query()
                     ->whereKey($generation->id)
                     ->lockForUpdate()
@@ -328,6 +362,7 @@ class RecurringBillingService
 
                 $generation->status = RecurringBillingGenerationStatus::Succeeded;
                 $generation->invoice_id = $invoice->id;
+                $generation->delivery_channel = $locked->delivery_channel;
                 $generation->completed_at = now();
                 $generation->failure_reason = null;
                 $generation->save();
@@ -359,6 +394,8 @@ class RecurringBillingService
                     actor: $actor,
                 );
 
+                $generatedNow = true;
+
                 return $generation->refresh()->load('invoice');
             });
         } catch (Throwable $e) {
@@ -383,6 +420,12 @@ class RecurringBillingService
 
             return $generation->refresh();
         }
+
+        if ($generatedNow) {
+            $this->dispatchDelivery($result);
+        }
+
+        return $result;
     }
 
     public function retryGeneration(RecurringBillingGeneration $generation, User $actor): RecurringBillingGeneration
@@ -552,6 +595,75 @@ class RecurringBillingService
         }
 
         return $generation->refresh();
+    }
+
+    /**
+     * PDF + customer delivery run on the queue once the invoice is committed. Nothing here
+     * may affect the generation result: the invoice already exists.
+     */
+    private function dispatchDelivery(RecurringBillingGeneration $generation): void
+    {
+        try {
+            app(Dispatcher::class)->dispatch((new DeliverRecurringInvoice($generation->id))->afterCommit());
+        } catch (Throwable $e) {
+            report($e);
+        }
+    }
+
+    private function assertDeliverable(Contact $contact, RecurringBillingDeliveryChannel $channel): void
+    {
+        $channels = $channel->channels();
+
+        if (in_array(CommunicationChannel::Email, $channels, true)
+            && filter_var(trim((string) $contact->email), FILTER_VALIDATE_EMAIL) === false) {
+            throw ValidationException::withMessages([
+                'delivery_channel' => 'This customer has no valid email address, so invoices cannot be delivered by email.',
+            ]);
+        }
+
+        if (in_array(CommunicationChannel::WhatsApp, $channels, true)) {
+            if (! $contact->whatsapp_opt_in) {
+                throw ValidationException::withMessages([
+                    'delivery_channel' => 'This customer has not opted in to WhatsApp, so invoices cannot be delivered on WhatsApp.',
+                ]);
+            }
+
+            if (WhatsAppPhone::fromContact($contact) === null) {
+                throw ValidationException::withMessages([
+                    'delivery_channel' => 'This customer has no valid WhatsApp number, so invoices cannot be delivered on WhatsApp.',
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Zero-priced lines are allowed (as on any invoice), but a schedule must bill something.
+     *
+     * @param  list<array<string, mixed>>  $items
+     */
+    private function assertBillable(
+        array $items,
+        DiscountType $discountType,
+        string|int|float|null $discountValue,
+        bool $taxEnabled,
+        string|int|float|null $taxRate,
+    ): void {
+        $calculated = DocumentCalculator::calculate(
+            array_map(fn (array $item) => [
+                'quantity' => $item['quantity'] ?? '0',
+                'unit_price' => $item['unit_price'] ?? '0',
+            ], array_values($items)),
+            $discountType,
+            $discountValue ?? '0',
+            $taxEnabled,
+            $taxRate,
+        );
+
+        if (Money::compare((string) $calculated['total'], '0') <= 0) {
+            throw ValidationException::withMessages([
+                'items' => 'The recurring invoice total must be greater than zero.',
+            ]);
+        }
     }
 
     private function requireCustomer(int $contactId): Contact
