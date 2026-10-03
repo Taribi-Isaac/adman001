@@ -19,6 +19,7 @@ type BroadcastDetail = {
     body: string | null;
     whatsapp_template_name: string | null;
     whatsapp_template_language: string | null;
+    whatsapp_message: string | null;
     status: string;
     status_label: string;
     recipient_count: number;
@@ -56,6 +57,12 @@ type Preview = {
     template: { name: string; language: string } | null;
     blockers: string[];
     sample: Array<{ id: number; name: string }>;
+    whatsapp: {
+        sample_contact_name: string;
+        parameters: Array<{ key: string; label: string; value: string }>;
+        rendered: string | null;
+        message_line_breaks_collapsed: boolean;
+    } | null;
 };
 
 type RecipientRow = {
@@ -282,9 +289,22 @@ const refresh = () => {
                         }})
                     </span>
                 </p>
+                <template v-if="broadcast.whatsapp_message">
+                    <p class="text-sm text-muted-foreground">
+                        Campaign message (the same for every recipient):
+                    </p>
+                    <div
+                        class="rounded-md border border-border bg-muted/20 p-3 text-sm whitespace-pre-line"
+                    >
+                        {{ broadcast.whatsapp_message }}
+                    </div>
+                </template>
                 <p class="text-xs text-muted-foreground">
                     The customer receives the template text exactly as approved
-                    by Meta.
+                    by Meta<span v-if="broadcast.whatsapp_message"
+                        >, greeted by name, with the campaign message
+                        inserted</span
+                    >.
                 </p>
             </template>
         </section>
@@ -346,6 +366,45 @@ const refresh = () => {
                 </ul>
                 <p class="text-xs text-muted-foreground">
                     A contact can be excluded for more than one reason.
+                </p>
+            </div>
+
+            <div v-if="preview.whatsapp" class="space-y-2">
+                <h3
+                    class="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+                >
+                    Message preview for
+                    {{ preview.whatsapp.sample_contact_name }}
+                </h3>
+                <div
+                    v-if="preview.whatsapp.rendered"
+                    class="rounded-md border border-border bg-muted/20 p-3 text-sm whitespace-pre-line"
+                >
+                    {{ preview.whatsapp.rendered }}
+                </div>
+                <p v-else class="text-xs text-muted-foreground">
+                    The approved template wording could not be loaded from
+                    WhatsApp Manager right now. These values will be inserted
+                    into it:
+                </p>
+                <dl class="space-y-1 text-sm">
+                    <div
+                        v-for="parameter in preview.whatsapp.parameters"
+                        :key="parameter.key"
+                    >
+                        <dt class="text-xs text-muted-foreground">
+                            {{ parameter.label }}
+                        </dt>
+                        <dd>{{ parameter.value }}</dd>
+                    </div>
+                </dl>
+                <p
+                    v-if="preview.whatsapp.message_line_breaks_collapsed"
+                    class="text-xs text-muted-foreground"
+                >
+                    WhatsApp does not allow line breaks inside template
+                    variables, so line breaks in your message are sent as spaces
+                    (as shown above).
                 </p>
             </div>
 

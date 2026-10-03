@@ -49,6 +49,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Concerns\CreatesFoundationUsers;
 use Tests\TestCase;
 
@@ -1078,5 +1079,415 @@ class BroadcastTest extends TestCase
         $url = EmailOutboundService::broadcastUnsubscribeUrl($contact->id, $broadcast->id);
         $this->assertTrue(URL::hasValidSignature(\Illuminate\Http\Request::create($url)));
         $this->get(str_replace('signature=', 'signature=x', $url))->assertForbidden();
+    }
+
+    // ---------------------------------------------------------------------
+    // Campaign message ({{2}}, Task 046)
+    // ---------------------------------------------------------------------
+
+    private const CAMPAIGN_MESSAGE = 'We will be closed on Monday, 5 October 2026, and normal operations will resume on Tuesday.';
+
+    private function enableMessageTemplate(): void
+    {
+        $this->enableBroadcastTemplate('adman_promo_v2', 'contact_name,broadcast_message');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function whatsappForm(array $overrides = []): array
+    {
+        return array_merge([
+            'name' => 'Holiday notice',
+            'channel' => 'whatsapp',
+            'audience_type' => 'customers',
+            'whatsapp_message' => self::CAMPAIGN_MESSAGE,
+        ], $overrides);
+    }
+
+    public function test_whatsapp_broadcast_requires_campaign_message_server_side(): void
+    {
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm(['whatsapp_message' => null]))
+            ->assertSessionHasErrors(['whatsapp_message' => 'A WhatsApp broadcast needs a campaign message.']);
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm(['whatsapp_message' => "   \n  "]))
+            ->assertSessionHasErrors('whatsapp_message');
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm([
+            'whatsapp_message' => str_repeat('a', WhatsAppBroadcastTemplate::MESSAGE_MAX_LENGTH + 1),
+        ]))->assertSessionHasErrors('whatsapp_message');
+
+        $this->assertSame(0, Broadcast::query()->count());
+
+        // A draft saved without a message (e.g. under the old template) cannot be started.
+        $this->whatsappContact();
+        $broadcast = $this->draft($owner, ['channel' => 'whatsapp']);
+        $preview = app(BroadcastService::class)->preview($broadcast);
+        $this->assertContains('The WhatsApp template needs a campaign message. Edit the draft and add the message.', $preview['blockers']);
+
+        $this->actingAs($owner)
+            ->post(route('broadcasts.send', $broadcast), ['confirm_recipient_count' => 1])
+            ->assertSessionHasErrors('broadcast');
+        $this->assertSame(BroadcastStatus::Draft, $broadcast->fresh()->status);
+        $this->assertSame([], $this->adapter->calls);
+    }
+
+    public function test_campaign_message_is_persisted_on_the_broadcast(): void
+    {
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm())->assertSessionHasNoErrors();
+
+        $broadcast = Broadcast::query()->sole();
+        $this->assertSame(self::CAMPAIGN_MESSAGE, $broadcast->whatsapp_message);
+        $this->assertNull($broadcast->subject);
+        $this->assertNull($broadcast->body);
+        $this->assertSame(0, Message::query()->count());
+
+        $this->actingAs($owner)->get(route('broadcasts.edit', $broadcast))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('broadcast.whatsapp_message', self::CAMPAIGN_MESSAGE)
+                ->where('whatsappTemplate.uses_message', true)
+                ->where('whatsappTemplate.message_max_length', WhatsAppBroadcastTemplate::MESSAGE_MAX_LENGTH));
+    }
+
+    public function test_draft_campaign_message_can_be_edited(): void
+    {
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm());
+        $broadcast = Broadcast::query()->sole();
+
+        $this->actingAs($owner)
+            ->put(route('broadcasts.update', $broadcast), $this->whatsappForm(['whatsapp_message' => 'Our office hours have changed.']))
+            ->assertRedirect(route('broadcasts.show', $broadcast));
+
+        $this->assertSame('Our office hours have changed.', $broadcast->fresh()->whatsapp_message);
+        $this->assertTrue(AuditEvent::query()->where('event', 'broadcast.updated')->exists());
+    }
+
+    public function test_campaign_message_cannot_be_changed_once_sending_starts(): void
+    {
+        Queue::fake([ProcessBroadcastJob::class]);
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact();
+        $broadcast = $this->startNow($this->draft($owner, ['channel' => 'whatsapp', 'whatsapp_message' => self::CAMPAIGN_MESSAGE]), $owner);
+        $this->assertSame(BroadcastStatus::Queued, $broadcast->fresh()->status);
+
+        $this->actingAs($owner)->get(route('broadcasts.edit', $broadcast))->assertRedirect(route('broadcasts.show', $broadcast));
+        $this->actingAs($owner)
+            ->put(route('broadcasts.update', $broadcast), $this->whatsappForm(['whatsapp_message' => 'Changed after queueing']))
+            ->assertSessionHasErrors('broadcast');
+
+        try {
+            app(BroadcastService::class)->update($broadcast, $this->whatsappForm(['whatsapp_message' => 'Changed again']), $owner);
+            $this->fail('A queued broadcast must not be editable.');
+        } catch (ValidationException) {
+        }
+
+        $this->assertSame(self::CAMPAIGN_MESSAGE, $broadcast->fresh()->whatsapp_message);
+    }
+
+    public function test_template_parameters_are_contact_name_then_the_same_campaign_message_for_every_recipient(): void
+    {
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact(['display_name' => 'Ada Obi']);
+        $this->whatsappContact(['display_name' => 'Bola Ade']);
+        $this->whatsappContact(['display_name' => 'Chidi Eze']);
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm());
+        $broadcast = Broadcast::query()->sole();
+
+        $this->actingAs($owner)
+            ->post(route('broadcasts.send', $broadcast), ['confirm_recipient_count' => 3])
+            ->assertRedirect(route('broadcasts.show', $broadcast));
+
+        $calls = $this->templateCalls();
+        $this->assertCount(3, $calls);
+        $this->assertSame(['Ada Obi', self::CAMPAIGN_MESSAGE], $calls[0]->bodyParameters);
+        $this->assertSame(['Bola Ade', self::CAMPAIGN_MESSAGE], $calls[1]->bodyParameters);
+        $this->assertSame(['Chidi Eze', self::CAMPAIGN_MESSAGE], $calls[2]->bodyParameters);
+        foreach ($calls as $payload) {
+            $this->assertSame('adman_promo_v2', $payload->templateName);
+            $this->assertNull($payload->templateKey);
+        }
+
+        $message = Message::query()->orderBy('id')->firstOrFail();
+        $this->assertSame(['Ada Obi', self::CAMPAIGN_MESSAGE], $message->meta['body_parameters']);
+        $this->assertStringContainsString('Campaign message: '.self::CAMPAIGN_MESSAGE, $message->body);
+        $this->assertSame(BroadcastStatus::Completed, $broadcast->fresh()->status);
+    }
+
+    public function test_frontend_cannot_inject_template_parameters(): void
+    {
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact(['display_name' => 'Ada Obi']);
+
+        foreach (['Hi {{1}}, offer inside', 'Use code {{2}}', 'Closing }} brace'] as $placeholder) {
+            $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm(['whatsapp_message' => $placeholder]))
+                ->assertSessionHasErrors('whatsapp_message');
+        }
+        $this->assertSame(0, Broadcast::query()->count());
+
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm([
+            'body_parameters' => ['Injected name', 'Injected message', 'Extra'],
+            'parameters' => 'contact_name,broadcast_message,discount_code',
+            'whatsapp_template_name' => 'invoice_sent',
+            'status' => 'queued',
+        ]))->assertSessionHasNoErrors();
+        $broadcast = Broadcast::query()->sole();
+        $this->assertSame(BroadcastStatus::Draft, $broadcast->status);
+        $this->assertNull($broadcast->whatsapp_template_name);
+
+        $this->actingAs($owner)->post(route('broadcasts.send', $broadcast), [
+            'confirm_recipient_count' => 1,
+            'whatsapp_message' => 'Swapped at send time',
+            'body_parameters' => ['Injected name', 'Injected message'],
+        ])->assertRedirect(route('broadcasts.show', $broadcast));
+
+        $calls = $this->templateCalls();
+        $this->assertCount(1, $calls);
+        $this->assertSame('adman_promo_v2', $calls[0]->templateName);
+        $this->assertSame(['Ada Obi', self::CAMPAIGN_MESSAGE], $calls[0]->bodyParameters);
+        $this->assertSame(self::CAMPAIGN_MESSAGE, $broadcast->fresh()->whatsapp_message);
+    }
+
+    public function test_campaign_message_with_punctuation_and_line_breaks(): void
+    {
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact(['display_name' => 'Ada Obi']);
+        $typed = "Dear valued customer — good news!\r\n\r\nOur new price list (₦25,000/month) starts 1/11/2026; questions? Reply \"HELP\" & we’ll call.\n\tThanks.";
+
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm(['whatsapp_message' => $typed]))->assertSessionHasNoErrors();
+        $broadcast = Broadcast::query()->sole();
+        $this->assertSame(
+            "Dear valued customer — good news!\n\nOur new price list (₦25,000/month) starts 1/11/2026; questions? Reply \"HELP\" & we’ll call.\n\tThanks.",
+            $broadcast->whatsapp_message,
+        );
+
+        $this->startNow($broadcast, $owner);
+
+        $sent = 'Dear valued customer — good news! Our new price list (₦25,000/month) starts 1/11/2026; questions? Reply "HELP" & we’ll call. Thanks.';
+        $this->assertSame(['Ada Obi', $sent], $this->templateCalls()[0]->bodyParameters);
+        $this->assertSame(['Ada Obi', $sent], Message::query()->sole()->meta['body_parameters']);
+    }
+
+    public function test_preview_renders_contact_name_and_campaign_message(): void
+    {
+        $this->enableMessageTemplate();
+        config(['adman.whatsapp.business_account_id' => 'waba-test']);
+        Http::fake(['graph.facebook.com/*/waba-test/message_templates*' => Http::response(['data' => [[
+            'name' => 'adman_promo_v2',
+            'language' => 'en',
+            'status' => 'APPROVED',
+            'components' => [[
+                'type' => 'BODY',
+                'text' => "Hello {{1}},\n\nWe’re sharing an update from Raslordeck Limited.\n\n{{2}}\n\nThank you for staying connected with us.",
+            ]],
+        ]]])]);
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact(['display_name' => 'Ada Obi']);
+        $this->whatsappContact(['display_name' => 'Bola Ade']);
+        $broadcast = $this->draft($owner, ['channel' => 'whatsapp', 'whatsapp_message' => self::CAMPAIGN_MESSAGE]);
+
+        $this->actingAs($owner)->get(route('broadcasts.show', $broadcast))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('preview.eligible_count', 2)
+                ->where('preview.whatsapp.sample_contact_name', 'Ada Obi')
+                ->where('preview.whatsapp.rendered', "Hello Ada Obi,\n\nWe’re sharing an update from Raslordeck Limited.\n\n"
+                    .self::CAMPAIGN_MESSAGE."\n\nThank you for staying connected with us.")
+                ->where('preview.whatsapp.parameters.0.label', 'Contact name (personalised for each recipient)')
+                ->where('preview.whatsapp.parameters.1.label', 'Campaign message (the same for every recipient)')
+                ->where('preview.whatsapp.parameters.1.value', self::CAMPAIGN_MESSAGE)
+                ->where('broadcast.whatsapp_message', self::CAMPAIGN_MESSAGE));
+
+        Http::assertSent(fn (Request $request) => str_contains($request->url(), 'name=adman_promo_v2'));
+        $this->assertSame([], $this->adapter->calls);
+        $this->assertSame(0, Message::query()->count());
+    }
+
+    public function test_preview_falls_back_to_values_when_template_wording_is_unavailable(): void
+    {
+        $this->enableMessageTemplate();
+        config(['adman.whatsapp.business_account_id' => 'waba-test']);
+        Http::fake(['graph.facebook.com/*' => Http::response(['error' => ['code' => 190]], 401)]);
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact(['display_name' => 'Ada Obi']);
+        $broadcast = $this->draft($owner, ['channel' => 'whatsapp', 'whatsapp_message' => "Line one\nLine two"]);
+
+        $this->actingAs($owner)->get(route('broadcasts.show', $broadcast))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('preview.whatsapp.rendered', null)
+                ->where('preview.whatsapp.parameters.0.value', 'Ada Obi')
+                ->where('preview.whatsapp.parameters.1.value', 'Line one Line two')
+                ->where('preview.whatsapp.message_line_breaks_collapsed', true)
+                ->where('preview.blockers', []));
+    }
+
+    public function test_campaign_message_broadcast_keeps_consent_rules(): void
+    {
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $consented = $this->whatsappContact();
+        $this->whatsappContact(['whatsapp_broadcast_opt_in_at' => null, 'whatsapp_broadcast_opt_in_source' => null]);
+        $this->whatsappContact(['whatsapp_broadcast_opt_out_at' => now(), 'whatsapp_broadcast_opt_out_source' => ConsentSource::WhatsApp]);
+        $this->whatsappContact(['archived_at' => now()]);
+        $broadcast = $this->draft($owner, ['channel' => 'whatsapp', 'whatsapp_message' => self::CAMPAIGN_MESSAGE]);
+
+        $this->assertSame([$consented->id], $this->eligibleIds($broadcast));
+
+        $this->startNow($broadcast, $owner);
+        $this->assertSame([$consented->whatsapp_id], array_map(fn ($p) => $p->to, $this->templateCalls()));
+        $this->assertSame([$consented->id], BroadcastRecipient::query()->pluck('contact_id')->all());
+    }
+
+    public function test_campaign_message_broadcast_keeps_recipient_limit(): void
+    {
+        config(['adman.broadcasts.recipient_limit' => 2]);
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact();
+        $this->whatsappContact();
+        $this->whatsappContact();
+        $broadcast = $this->draft($owner, ['channel' => 'whatsapp', 'whatsapp_message' => self::CAMPAIGN_MESSAGE]);
+
+        $this->assertTrue(app(BroadcastService::class)->preview($broadcast)['over_limit']);
+        $this->actingAs($owner)
+            ->post(route('broadcasts.send', $broadcast), ['confirm_recipient_count' => 3])
+            ->assertSessionHasErrors('broadcast');
+
+        $this->assertSame([], $this->adapter->calls);
+        $this->assertSame(0, BroadcastRecipient::query()->count());
+    }
+
+    public function test_campaign_message_broadcast_keeps_send_permission(): void
+    {
+        $this->enableMessageTemplate();
+        $manager = $this->staffWith(Permissions::BROADCASTS_MANAGE);
+        $this->whatsappContact();
+
+        $this->actingAs($manager)->post('/broadcasts', $this->whatsappForm())->assertSessionHasNoErrors();
+        $broadcast = Broadcast::query()->sole();
+
+        $this->actingAs($manager)
+            ->post(route('broadcasts.send', $broadcast), ['confirm_recipient_count' => 1])
+            ->assertForbidden();
+        $this->actingAs($this->createStaffUser())->post('/broadcasts', $this->whatsappForm())->assertForbidden();
+
+        $this->assertSame(BroadcastStatus::Draft, $broadcast->fresh()->status);
+        $this->assertSame([], $this->adapter->calls);
+    }
+
+    public function test_campaign_message_broadcast_blocked_when_business_switch_is_off(): void
+    {
+        $this->enableMessageTemplate();
+        Business::current()->update(['broadcasts_enabled' => false]);
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact();
+        $broadcast = $this->draft($owner, ['channel' => 'whatsapp', 'whatsapp_message' => self::CAMPAIGN_MESSAGE]);
+
+        $this->assertContains('Broadcasts are turned off in Business settings.', app(BroadcastService::class)->preview($broadcast)['blockers']);
+        $this->actingAs($owner)
+            ->post(route('broadcasts.send', $broadcast), ['confirm_recipient_count' => 1])
+            ->assertSessionHasErrors('broadcast');
+
+        $this->assertSame(BroadcastStatus::Draft, $broadcast->fresh()->status);
+        $this->assertSame([], $this->adapter->calls);
+    }
+
+    public function test_fixed_wording_template_refuses_a_campaign_message(): void
+    {
+        $this->enableBroadcastTemplate('adman_promo_test', 'contact_name');
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact(['display_name' => 'Ada Obi']);
+
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm())
+            ->assertSessionHasErrors('whatsapp_message');
+        $this->actingAs($owner)->post('/broadcasts', $this->whatsappForm(['whatsapp_message' => null]))
+            ->assertSessionHasNoErrors();
+        $this->actingAs($owner)->get('/broadcasts/create')
+            ->assertInertia(fn (Assert $page) => $page->where('whatsappTemplate.uses_message', false));
+
+        // A draft written for {{2}} cannot go out through a template that would silently drop it.
+        $withMessage = $this->draft($owner, ['channel' => 'whatsapp', 'whatsapp_message' => self::CAMPAIGN_MESSAGE]);
+        $this->assertStringContainsString('fixed wording', implode(' ', app(BroadcastService::class)->preview($withMessage)['blockers']));
+
+        $this->startNow(Broadcast::query()->where('name', 'Holiday notice')->sole(), $owner);
+        $this->assertSame(['Ada Obi'], $this->templateCalls()[0]->bodyParameters);
+    }
+
+    public function test_template_change_mid_send_to_require_a_message_stops_the_broadcast(): void
+    {
+        Queue::fake([ProcessBroadcastJob::class]);
+        $this->enableBroadcastTemplate('adman_promo_v2', 'contact_name');
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact();
+        $broadcast = $this->startNow($this->draft($owner, ['channel' => 'whatsapp']), $owner);
+
+        $this->enableMessageTemplate();
+        app(BroadcastService::class)->processNextBatch($broadcast->id);
+
+        $broadcast->refresh();
+        $this->assertSame(BroadcastStatus::Failed, $broadcast->status);
+        $this->assertStringContainsString('campaign message', (string) $broadcast->failure_reason);
+        $this->assertSame([], $this->adapter->calls);
+        $this->assertSame(0, Message::query()->count());
+    }
+
+    public function test_transactional_templates_never_receive_the_campaign_message(): void
+    {
+        config(['adman.whatsapp.templates' => [
+            'quote' => ['name' => 'quote_document', 'language' => 'en', 'enabled' => true],
+            'invoice' => ['name' => 'invoice_sent', 'language' => 'en', 'enabled' => true],
+            'invoice_reminder' => ['name' => 'invoice_reminder', 'language' => 'en', 'enabled' => true],
+            'payment_acknowledgement' => ['name' => 'payment_acknowledgement', 'language' => 'en', 'enabled' => true],
+        ]]);
+
+        foreach (['quote_document', 'invoice_sent', 'invoice_reminder', 'payment_acknowledgement'] as $utility) {
+            $this->enableBroadcastTemplate($utility, 'contact_name,broadcast_message');
+            $this->assertNull(WhatsAppBroadcastTemplate::configured(), $utility.' must be refused');
+        }
+
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $this->whatsappContact();
+        $this->startNow($this->draft($owner, ['channel' => 'whatsapp', 'whatsapp_message' => self::CAMPAIGN_MESSAGE]), $owner);
+
+        foreach ($this->templateCalls() as $payload) {
+            $this->assertSame('adman_promo_v2', $payload->templateName);
+            $this->assertNull($payload->templateKey);
+            $this->assertNull($payload->headerDocumentMediaId);
+        }
+    }
+
+    public function test_email_broadcast_is_unaffected_by_campaign_message(): void
+    {
+        $this->enableMessageTemplate();
+        $owner = $this->createSuperAdmin();
+        $this->emailContact();
+
+        $this->actingAs($owner)->post('/broadcasts', [
+            'name' => 'Email offer',
+            'channel' => 'email',
+            'audience_type' => 'customers',
+            'subject' => 'Our October offer',
+            'body' => 'Hello',
+            'whatsapp_message' => 'Ignored for email',
+        ])->assertSessionHasNoErrors();
+
+        $broadcast = Broadcast::query()->sole();
+        $this->assertNull($broadcast->whatsapp_message);
+        $this->assertSame([], app(BroadcastService::class)->preview($broadcast)['blockers']);
+
+        $this->startNow($broadcast, $owner);
+        $this->assertSame(BroadcastStatus::Completed, $broadcast->fresh()->status);
+        $this->assertSame([], $this->adapter->calls);
+        $this->assertSame(1, Message::query()->count());
     }
 }

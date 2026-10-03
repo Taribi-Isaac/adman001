@@ -57,7 +57,8 @@ return [
         ],
         // Approved Meta *Marketing* template for broadcasts (Task 038). Kept apart from the
         // transactional Utility templates above; it must never be one of them. `parameters`
-        // lists the body variables in order: empty (none) or `contact_name`.
+        // lists the body variables in order: empty (none), `contact_name`, or
+        // `contact_name,broadcast_message` ({{2}} = the broadcast's campaign message).
         'broadcast_template' => [
             'name' => env('WHATSAPP_TEMPLATE_BROADCAST'),
             'language' => env('WHATSAPP_TEMPLATE_BROADCAST_LANGUAGE'),

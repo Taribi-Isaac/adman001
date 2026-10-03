@@ -7,6 +7,7 @@ export type BroadcastFormProps = {
         selected_contact_ids: number[];
         subject: string | null;
         body: string | null;
+        whatsapp_message: string | null;
     } | null;
     channelOptions: Array<{ value: string; label: string }>;
     audienceOptions: Array<{ value: string; label: string }>;
@@ -22,6 +23,8 @@ export type BroadcastFormProps = {
         name: string | null;
         language: string | null;
         problem: string | null;
+        uses_message: boolean;
+        message_max_length: number;
     };
     recipientLimit: number;
     broadcastsEnabled: boolean;

@@ -47,7 +47,7 @@ class BroadcastService
     }
 
     /**
-     * @param  array{name: string, channel: string, audience_type: string, selected_contact_ids?: list<int>|null, subject?: string|null, body?: string|null}  $data
+     * @param  array{name: string, channel: string, audience_type: string, selected_contact_ids?: list<int>|null, subject?: string|null, body?: string|null, whatsapp_message?: string|null}  $data
      */
     public function create(array $data, User $actor): Broadcast
     {
@@ -73,7 +73,7 @@ class BroadcastService
     }
 
     /**
-     * @param  array{name: string, channel: string, audience_type: string, selected_contact_ids?: list<int>|null, subject?: string|null, body?: string|null}  $data
+     * @param  array{name: string, channel: string, audience_type: string, selected_contact_ids?: list<int>|null, subject?: string|null, body?: string|null, whatsapp_message?: string|null}  $data
      */
     public function update(Broadcast $broadcast, array $data, User $actor): Broadcast
     {
@@ -156,6 +156,9 @@ class BroadcastService
                 $blockers[] = (string) WhatsAppBroadcastTemplate::problem();
             } else {
                 $template = ['name' => $configured->name, 'language' => $configured->language];
+                if (($contentProblem = $configured->problemFor($broadcast)) !== null) {
+                    $blockers[] = $contentProblem;
+                }
             }
         } else {
             if (trim((string) $broadcast->subject) === '' || trim((string) $broadcast->body) === '') {
@@ -316,6 +319,12 @@ class BroadcastService
                 $this->stop($broadcast->id, $template === null
                     ? (string) WhatsAppBroadcastTemplate::problem()
                     : 'The WhatsApp broadcast template configuration changed after this broadcast started.');
+
+                return false;
+            }
+
+            if (($contentProblem = $template->problemFor($broadcast)) !== null) {
+                $this->stop($broadcast->id, $contentProblem);
 
                 return false;
             }
@@ -735,6 +744,9 @@ class BroadcastService
                 : null,
             'subject' => $channel === CommunicationChannel::Email ? trim((string) ($data['subject'] ?? '')) : null,
             'body' => $channel === CommunicationChannel::Email ? trim((string) ($data['body'] ?? '')) : null,
+            'whatsapp_message' => $channel === CommunicationChannel::WhatsApp
+                ? (trim(str_replace(["\r\n", "\r"], "\n", (string) ($data['whatsapp_message'] ?? ''))) ?: null)
+                : null,
         ];
     }
 }

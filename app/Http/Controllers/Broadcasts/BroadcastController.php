@@ -16,6 +16,7 @@ use App\Models\Contact;
 use App\Services\BroadcastService;
 use App\Support\Permissions;
 use App\Support\WhatsAppBroadcastTemplate;
+use App\WhatsApp\WhatsAppTemplateCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -93,7 +94,7 @@ class BroadcastController extends Controller
             ->with('success', 'Broadcast draft updated. Review the audience below; nothing has been sent.');
     }
 
-    public function show(Request $request, Broadcast $broadcast, BroadcastService $broadcasts): Response
+    public function show(Request $request, Broadcast $broadcast, BroadcastService $broadcasts, WhatsAppTemplateCatalog $catalog): Response
     {
         $this->authorize(Permissions::BROADCASTS_MANAGE);
 
@@ -112,6 +113,9 @@ class BroadcastController extends Controller
                 'template' => $result['template'],
                 'blockers' => $result['blockers'],
                 'sample' => array_map(fn (Contact $c) => ['id' => $c->id, 'name' => $c->display_name], array_slice($result['eligible'], 0, 10)),
+                'whatsapp' => $broadcast->channel === CommunicationChannel::WhatsApp
+                    ? $this->whatsappPreview($broadcast, $result['eligible'][0] ?? null, $catalog)
+                    : null,
             ];
         }
 
@@ -148,6 +152,7 @@ class BroadcastController extends Controller
                 'body' => $broadcast->body,
                 'whatsapp_template_name' => $broadcast->whatsapp_template_name,
                 'whatsapp_template_language' => $broadcast->whatsapp_template_language,
+                'whatsapp_message' => $broadcast->whatsapp_message,
                 'status' => $broadcast->status->value,
                 'status_label' => $broadcast->status->label(),
                 'recipient_count' => $broadcast->recipient_count,
@@ -219,6 +224,7 @@ class BroadcastController extends Controller
                 'selected_contact_ids' => $broadcast->selected_contact_ids ?? [],
                 'subject' => $broadcast->subject,
                 'body' => $broadcast->body,
+                'whatsapp_message' => $broadcast->whatsapp_message,
             ],
             'channelOptions' => collect(CommunicationChannel::cases())->map(fn (CommunicationChannel $c) => [
                 'value' => $c->value,
@@ -245,9 +251,50 @@ class BroadcastController extends Controller
                 'name' => $template?->name,
                 'language' => $template?->language,
                 'problem' => WhatsAppBroadcastTemplate::problem(),
+                'uses_message' => $template?->usesMessage() ?? false,
+                'message_max_length' => WhatsAppBroadcastTemplate::MESSAGE_MAX_LENGTH,
             ],
             'recipientLimit' => BroadcastService::recipientLimit(),
             'broadcastsEnabled' => (bool) Business::current()->broadcasts_enabled,
+        ];
+    }
+
+    /**
+     * What one recipient would receive, built exactly like the send path builds it.
+     *
+     * @return array{
+     *     sample_contact_name: string,
+     *     parameters: list<array{key: string, label: string, value: string}>,
+     *     rendered: string|null,
+     *     message_line_breaks_collapsed: bool,
+     * }|null
+     */
+    private function whatsappPreview(Broadcast $broadcast, ?Contact $sample, WhatsAppTemplateCatalog $catalog): ?array
+    {
+        $template = WhatsAppBroadcastTemplate::configured();
+        if ($template === null || $template->problemFor($broadcast) !== null) {
+            return null;
+        }
+
+        $sampleName = $sample?->display_name ?? 'Customer name';
+        $values = $template->bodyParametersFor($sampleName, $broadcast->whatsapp_message);
+        $body = $catalog->approvedBody($template->name, $template->language);
+
+        $labels = [
+            'contact_name' => 'Contact name (personalised for each recipient)',
+            'broadcast_message' => 'Campaign message (the same for every recipient)',
+        ];
+
+        return [
+            'sample_contact_name' => $sampleName,
+            'parameters' => array_map(fn (string $key, string $value) => [
+                'key' => $key,
+                'label' => $labels[$key] ?? $key,
+                'value' => $value,
+            ], $template->parameters, $values),
+            'rendered' => $body === null ? null : WhatsAppBroadcastTemplate::render($body, $values),
+            'message_line_breaks_collapsed' => $template->usesMessage()
+                && preg_match('/[\r\n\t]/', (string) $broadcast->whatsapp_message) === 1,
         ];
     }
 

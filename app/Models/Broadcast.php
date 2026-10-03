@@ -24,6 +24,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $body
  * @property string|null $whatsapp_template_name
  * @property string|null $whatsapp_template_language
+ * @property string|null $whatsapp_message
  * @property BroadcastStatus $status
  * @property int|null $recipient_limit
  * @property int $recipient_count
@@ -51,6 +52,7 @@ class Broadcast extends Model
         'body',
         'whatsapp_template_name',
         'whatsapp_template_language',
+        'whatsapp_message',
         'status',
         'recipient_limit',
         'recipient_count',

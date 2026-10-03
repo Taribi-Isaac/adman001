@@ -115,14 +115,19 @@ class WhatsAppOutboundService
             $conversation = $this->conversations->reopen($conversation, ConversationMode::Human);
         }
 
-        $bodyParameters = $template->bodyParametersFor($contact->display_name);
+        $bodyParameters = $template->bodyParametersFor($contact->display_name, $broadcast->whatsapp_message);
 
-        $message = DB::transaction(function () use ($conversation, $actor, $broadcast, $recipient, $template, $to, $bodyParameters) {
+        $body = 'Broadcast "'.$broadcast->name.'" — approved WhatsApp Marketing template '.$template->name.'.';
+        if ($template->usesMessage()) {
+            $body .= "\n\nCampaign message: ".WhatsAppBroadcastTemplate::cleanParameter((string) $broadcast->whatsapp_message);
+        }
+
+        $message = DB::transaction(function () use ($conversation, $actor, $broadcast, $recipient, $template, $to, $bodyParameters, $body) {
             $message = Message::query()->create([
                 'conversation_id' => $conversation->id,
                 'direction' => MessageDirection::Outbound,
                 'channel' => CommunicationChannel::WhatsApp,
-                'body' => 'Broadcast "'.$broadcast->name.'" — approved WhatsApp Marketing template '.$template->name.'.',
+                'body' => $body,
                 'subject' => 'Broadcast: '.$broadcast->name,
                 'template_key' => null,
                 'document_id' => null,

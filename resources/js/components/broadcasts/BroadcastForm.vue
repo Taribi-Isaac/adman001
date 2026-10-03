@@ -19,9 +19,27 @@ const form = useForm({
     ] as number[],
     subject: props.broadcast?.subject ?? '',
     body: props.broadcast?.body ?? '',
+    whatsapp_message: props.broadcast?.whatsapp_message ?? '',
 });
 
 const isEmail = computed(() => form.channel === 'email');
+const needsWhatsAppMessage = computed(
+    () =>
+        !isEmail.value &&
+        props.whatsappTemplate.configured &&
+        props.whatsappTemplate.uses_message,
+);
+const whatsappMessageLength = computed(() => form.whatsapp_message.length);
+const whatsappMessageHasPlaceholder = computed(() =>
+    /\{\{|\}\}/.test(form.whatsapp_message),
+);
+const whatsappMessageError = computed(() => {
+    if (whatsappMessageHasPlaceholder.value) {
+        return 'The campaign message cannot contain {{ or }}. Write plain text; the customer name is added automatically.';
+    }
+
+    return form.errors.whatsapp_message;
+});
 const isSelected = computed(() => form.audience_type === 'selected');
 
 const contactFilter = ref('');
@@ -59,12 +77,19 @@ const selectedContactErrors = computed(() => {
 });
 
 const submit = () => {
+    if (needsWhatsAppMessage.value && whatsappMessageHasPlaceholder.value) {
+        return;
+    }
+
     form.transform((data) => ({
         ...data,
         selected_contact_ids:
             data.audience_type === 'selected' ? data.selected_contact_ids : [],
         subject: data.channel === 'email' ? data.subject : null,
         body: data.channel === 'email' ? data.body : null,
+        whatsapp_message: needsWhatsAppMessage.value
+            ? data.whatsapp_message
+            : null,
     }));
 
     if (props.broadcast) {
@@ -211,13 +236,46 @@ const submit = () => {
             </div>
         </section>
 
-        <section v-else class="neo-surface space-y-2 p-5">
+        <section v-else class="neo-surface space-y-3 p-5">
             <h2 class="text-sm font-semibold">WhatsApp content</h2>
-            <p class="text-sm text-muted-foreground">
+            <p
+                v-if="needsWhatsAppMessage"
+                class="text-sm text-muted-foreground"
+            >
+                WhatsApp broadcasts use a Marketing template approved by Meta.
+                The template greets each customer by name and includes the
+                message you write below.
+            </p>
+            <p v-else class="text-sm text-muted-foreground">
                 WhatsApp broadcasts can only use a Marketing template approved
                 by Meta. The message text is the approved template; it cannot be
                 written here.
             </p>
+            <div v-if="needsWhatsAppMessage" class="space-y-2">
+                <Label for="whatsapp_message">Message</Label>
+                <Textarea
+                    id="whatsapp_message"
+                    v-model="form.whatsapp_message"
+                    :rows="6"
+                    required
+                    :maxlength="whatsappTemplate.message_max_length"
+                />
+                <div
+                    class="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground"
+                >
+                    <p>
+                        This message is inserted into the approved WhatsApp
+                        template. The customer name is added automatically. The
+                        same message is sent to every selected recipient. Plain
+                        text only; line breaks are sent as spaces.
+                    </p>
+                    <span class="tabular-nums">
+                        {{ whatsappMessageLength }} /
+                        {{ whatsappTemplate.message_max_length }}
+                    </span>
+                </div>
+                <InputError :message="whatsappMessageError" />
+            </div>
             <p v-if="whatsappTemplate.configured" class="text-sm">
                 Template:
                 <span class="font-medium">{{ whatsappTemplate.name }}</span>
