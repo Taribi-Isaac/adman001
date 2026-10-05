@@ -9,7 +9,7 @@ WhatsApp is ADMAN’s second external communication channel, built on the Commun
 - Outbound: Staff action → pending `Message` → queue → WhatsApp Cloud API adapter → provider message id → status webhooks
 - Inbound: Verified webhook → identity → conversation → inbound `Message` → (when AI customer responses enabled) `ProcessInboundAiMessage` → OpenAI + tools → session WhatsApp reply
 
-Recurring invoice generation does **not** auto-send WhatsApp.
+Recurring invoices are sent on WhatsApp automatically only when their schedule's delivery channel is `whatsapp` or `both` (Task 048, `006-recurring-billing-domain.md` § Invoice delivery). They use `queueInvoiceWhatsApp` with all its rules (opt-in, 24-hour window, approved `invoice` template outside it, no free-form fallback); the default channel is `none`.
 
 ---
 
@@ -394,7 +394,6 @@ Job: 3 tries, backoff 30/120/300s. Permanent provider errors (auth, invalid temp
 ## Limitations / deferred
 
 - OCR / vision of inbound customer files
-- Automated recurring auto-send of invoices (invoice reminders owned by Task 009)
 - Template-based re-engagement from the conversation thread when the 24-hour window is closed (staff free-text replies exist since Task 032; transactional document templates since Task 036)
 - Broadcast scheduling, segmentation and campaign analytics (basic one-off broadcasts exist since Task 038, `017-broadcasts.md`)
 - Delivery/read UI polish beyond status labels

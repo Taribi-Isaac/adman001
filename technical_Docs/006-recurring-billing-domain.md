@@ -94,7 +94,9 @@ generation succeeded (transaction committed)
 - Re-running the job, the scheduler or a retry never queues a channel twice and never creates a second PDF.
 - Staff resend manually from the invoice page (existing Send buttons) if a channel was not delivered.
 
-Known limitation (existing document behaviour): each send creates a new secure view link for the invoice PDF, so with `both` the email's "view online" link is replaced once WhatsApp queues. The PDF itself is attached to both.
+Known limitation (existing document behaviour): each send creates a new secure view link for the invoice PDF, so with `both` the email's "view online" link is replaced once WhatsApp queues. The attached PDF is the authoritative delivery and is attached to both. Keeping one link valid per invoice across channels is a possible future enhancement; it is not changed.
+
+Production evidence (Task 048, 2026-10-04): the real 01:00 scheduler generated INV-00005 from UAT schedule #3, created PDF document #5, and delivered email message #131 (sent) and WhatsApp message #132 (`invoice_sent` template, delivered). The next scheduler run created nothing new. See `016-production-deployment.md` § Task 048.
 
 ## Idempotency & concurrency
 

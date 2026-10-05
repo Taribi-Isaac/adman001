@@ -11,7 +11,7 @@ Invoice → Reminder Rule → Eligibility → Reminder Occurrence → Email/What
 **Reminder Automation** decides *when* and *why* a reminder is appropriate.  
 **Communication** (Tasks 007–008) decides *how* it is delivered.
 
-Recurring Billing (Task 006) only generates invoices. After issue, those invoices are ordinary invoices and participate in reminders like any other.
+Recurring Billing (Task 006) generates invoices and, since Task 048, can deliver them once per its schedule's delivery channel. After issue, those invoices are ordinary invoices and participate in reminders like any other (cancelled invoices are skipped).
 
 ---
 

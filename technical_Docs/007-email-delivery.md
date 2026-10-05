@@ -6,7 +6,7 @@ Outbound email is ADMAN’s first external communication delivery channel. It pl
 
 **Flow:** Business action → Outbound `Message` (pending) → Queue job → Email delivery adapter → Laravel Mail / provider → Message status update.
 
-Recurring invoice generation does **not** automatically send email.
+Recurring invoices are emailed automatically only when their schedule's delivery channel is `email` or `both` (Task 048, `006-recurring-billing-domain.md` § Invoice delivery). They use `queueInvoiceEmail` with actor type `system`; the default channel is `none`.
 
 ---
 
@@ -216,7 +216,6 @@ Recorded failures include a staff-safe reason (no raw credentials). Retry uses t
 - No inbound email / mailbox sync
 - No Resend delivery/bounce/complaint webhooks yet (`delivered` status reserved)
 - Automated invoice reminders are owned by Task 009 (`ReminderService` → `queueInvoiceReminderEmail`); this domain still owns delivery only
-- No automatic email on recurring generation
 - No WhatsApp
 - Email broadcasts (Task 038, `017-broadcasts.md`) reuse this pipeline: `EmailOutboundService::queueBroadcastEmail` creates a normal Message (`template_key = broadcast`, no document) and `SendOutboundEmailJob` sends it through the same adapter with the `mail.broadcast` view, no attachment, a signed unsubscribe link and `List-Unsubscribe` / `List-Unsubscribe-Post` headers. Broadcast emails are never retried. Consent columns (`email_broadcast_opt_in_at`, `email_broadcast_unsubscribed_at`) are **not** read by document sending or reminders: an unsubscribed contact still receives invoice, quote, payment-acknowledgement and reminder emails, and those emails have no unsubscribe link or header. No Resend webhooks yet. See `002-contacts-domain.md` → Consent
 - Amazon SES is **not** used (Resend is the production provider)
